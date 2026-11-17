@@ -32,7 +32,7 @@ enum RecoveryOwnerError: Error, LocalizedError {
         "Couldn’t identify a volume owner for this installation. Its Recovery user metadata may need repair."
     case .ambiguous:
       return
-        "This installation has multiple eligible owners. Aurora could not determine which owner was selected in Recovery."
+        "This installation has multiple eligible owners. The installer could not determine which owner was selected in Recovery."
     case .changed: return "The volume owner changed. Continue again to authorize the current owner."
     }
   }

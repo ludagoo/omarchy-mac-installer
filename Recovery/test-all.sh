@@ -10,7 +10,7 @@ xcrun clang -Wall -Wextra -Werror Tests/AuthorizationCheck.c -o "$out/authorizat
 compile_run() {
   local name=$1
   shift
-  xcrun swiftc "$@" -o "$out/$name"
+  xcrun swiftc "$@" Sources/SmartRoomBrand.swift -o "$out/$name"
   "$out/$name"
 }
 compile_run enrollment Sources/EnrollmentGate.swift Tests/EnrollmentGateCheck.swift

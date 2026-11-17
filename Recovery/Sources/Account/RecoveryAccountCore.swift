@@ -567,7 +567,8 @@ public enum RecoveryAccountInstaller {
       }
       for (key, value) in [
         ("UniqueID", "501"), ("PrimaryGroupID", "20"),
-        ("RealName", "Omarchy Recovery"), ("NFSHomeDirectory", "/Users/\(username)"),
+        ("RealName", SmartRoomBrand.recoveryAccountName),
+        ("NFSHomeDirectory", "/Users/\(username)"),
         ("UserShell", "/bin/zsh"),
       ] {
         _ = try ds(ctx, ["-create", name, key, value])

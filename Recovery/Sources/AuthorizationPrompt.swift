@@ -24,7 +24,7 @@ struct AuthorizationPrompt: Equatable {
       rejection.map { $0 + " Enter it again, or choose Utilities → Show Details." }
       ?? "Enter password for \(owner)."
     if purpose == .install && macOSOwner {
-      text += " Use your existing macOS owner’s password to set up Omarchy."
+      text += " Use your existing macOS owner’s password to set up \(SmartRoomBrand.osName)."
     }
     return text
   }

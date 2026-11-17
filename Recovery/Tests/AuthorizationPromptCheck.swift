@@ -8,7 +8,7 @@ import Foundation
     precondition(install.action == "Install")
     precondition(
       install.message
-        == "Enter password for jane. Use your existing macOS owner’s password to set up Omarchy.",
+        == "Enter password for jane. Use your existing macOS owner’s password to set up SmartRoom Firmware.",
       install.message)
 
     // A target owner, such as the recovery account, is not a macOS owner.
@@ -22,7 +22,7 @@ import Foundation
     rejected.rejection = refused
     precondition(
       rejected.message
-        == "The password for jane was not accepted. Enter it again, or choose Utilities → Show Details. Use your existing macOS owner’s password to set up Omarchy.",
+        == "The password for jane was not accepted. Enter it again, or choose Utilities → Show Details. Use your existing macOS owner’s password to set up SmartRoom Firmware.",
       rejected.message)
     target.rejection = refused
     precondition(

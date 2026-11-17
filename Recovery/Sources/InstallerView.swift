@@ -62,7 +62,7 @@ final class InstallerView: NSViewController, NSTextFieldDelegate, NSMenuItemVali
     root.appearance = NSAppearance(named: .darkAqua)
     view = root
 
-    let wordmark = OmarchyWordmark(frame: .zero)
+    let wordmark = SmartRoomWordmark(frame: .zero)
     wordmark.translatesAutoresizingMaskIntoConstraints = false
     root.addSubview(wordmark)
 
@@ -246,7 +246,8 @@ final class InstallerView: NSViewController, NSTextFieldDelegate, NSMenuItemVali
     case .welcome:
       return model.asksForAuthorization ? model.authorizationPrompt.title : "Repair startup"
     case .installing:
-      return model.recoveryInterface ? "Restoring startup software" : "Setting up Omarchy"
+      return model.recoveryInterface
+        ? "Restoring startup software" : "Setting up \(SmartRoomBrand.osName)"
     case .account:
       return model.accountAlreadyStarted ? "Resume recovery setup" : "Create a recovery account"
     case .complete:
@@ -347,7 +348,7 @@ final class InstallerView: NSViewController, NSTextFieldDelegate, NSMenuItemVali
 
     let username = NSTextField()
     username.stringValue = model.accountUsername
-    username.placeholderString = "omarchy-owner"
+    username.placeholderString = SmartRoomBrand.recoveryAccountPlaceholder
     username.delegate = self
     username.identifier = NSUserInterfaceItemIdentifier("accountUsername")
     stack.addArrangedSubview(fieldRow("Username", field: username))
@@ -387,7 +388,7 @@ final class InstallerView: NSViewController, NSTextFieldDelegate, NSMenuItemVali
           "Enter the credentials for your macOS account and the recovery account you just created.",
           size: 12))
     } else {
-      stack.addArrangedSubview(label("Restart to start using Omarchy.", size: 12))
+      stack.addArrangedSubview(label("Restart to start using \(SmartRoomBrand.osName).", size: 12))
     }
     place(stack, top: 16)
   }
@@ -641,7 +642,7 @@ final class InstallerView: NSViewController, NSTextFieldDelegate, NSMenuItemVali
     let panel = RecoverySheet(
       title: "Installation details",
       message:
-        "Boot security is reduced only for this Omarchy installation. Your macOS security settings are unchanged."
+        "Boot security is reduced only for this \(SmartRoomBrand.osName) installation. Your macOS security settings are unchanged."
         + (log.truncated
           ? " Showing recent output. Copy Log includes this attempt’s full log." : ""),
       width: 550, body: viewer,

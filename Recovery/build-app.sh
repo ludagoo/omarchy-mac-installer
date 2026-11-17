@@ -9,6 +9,7 @@ APP="$OUT/Omarchy Installer.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 mkdir -p "$APP/Contents/Resources/en.lproj"
 cp Resources/en.lproj/InfoPlist.strings "$APP/Contents/Resources/en.lproj/InfoPlist.strings"
+cp ../LICENSE "$APP/Contents/Resources/LICENSE"
 # Build the standalone Recovery target with XcodeBuildMCP before packaging.
 if command -v "${XCODEBUILDMCP:-xcodebuildmcp}" >/dev/null 2>&1; then
   "${XCODEBUILDMCP:-xcodebuildmcp}" swift-package build --package-path "$PWD" --configuration release
@@ -52,7 +53,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <key>CFBundleIdentifier</key><string>org.aurorasilicon.omarchy.recovery.$MODE</string>
 <key>OmarchyRecoveryBuildMode</key><string>$MODE</string>
 <key>OmarchyRecoveryDataLayout</key><string>external-install-data-v1</string>
-<key>CFBundleName</key><string>Omarchy Installer</string>
+<key>CFBundleName</key><string>SmartRoom Firmware Installer</string>
 <key>CFBundleDisplayName</key><string>Omarchy Installer</string>
 <key>CFBundleDevelopmentRegion</key><string>en</string>
 <key>CFBundlePackageType</key><string>APPL</string>

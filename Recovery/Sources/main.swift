@@ -537,7 +537,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   func applicationDidFinishLaunching(_ notification: Notification) {
     LaunchTrace.mark("delegate.didFinishLaunching")
     let window = InstallerWindow()
-    window.title = "Omarchy Installer"
+    window.title = SmartRoomBrand.appName
     window.isOpaque = false
     window.backgroundColor = .clear
     window.hasShadow = true
@@ -570,6 +570,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
       }
     }
+    #if OMARCHY_STEP2_PREVIEW
+      SmartRoomSnapshots.start(model: model, controller: controller, window: window)
+    #endif
   }
 
   private func installMenus() {
@@ -581,13 +584,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       menu.addItem(item)
       return result
     }
-    let application = submenu("Omarchy Installer")
+    let application = submenu(SmartRoomBrand.appName)
     application.addItem(
-      withTitle: "About Omarchy Installer",
+      withTitle: "About \(SmartRoomBrand.appName)",
       action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
     application.addItem(.separator())
     application.addItem(
-      withTitle: "Hide Omarchy Installer", action: #selector(NSApplication.hide(_:)),
+      withTitle: "Hide \(SmartRoomBrand.appName)", action: #selector(NSApplication.hide(_:)),
       keyEquivalent: "h")
     let hideOthers = application.addItem(
       withTitle: "Hide Others", action: #selector(NSApplication.hideOtherApplications(_:)),
@@ -598,7 +601,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       keyEquivalent: "")
     application.addItem(.separator())
     application.addItem(
-      withTitle: "Quit Omarchy Installer", action: #selector(NSApplication.terminate(_:)),
+      withTitle: "Quit \(SmartRoomBrand.appName)", action: #selector(NSApplication.terminate(_:)),
       keyEquivalent: "q")
 
     let edit = submenu("Edit")
@@ -634,7 +637,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     NSApp.windowsMenu = windows
     let help = submenu("Help")
     let previewHelp = help.addItem(
-      withTitle: "About Omarchy Recovery", action: #selector(showPreviewHelp(_:)), keyEquivalent: ""
+      withTitle: "About \(SmartRoomBrand.osName) Recovery", action: #selector(showPreviewHelp(_:)),
+      keyEquivalent: ""
     )
     previewHelp.target = self
     NSApp.helpMenu = help
@@ -667,10 +671,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
   @objc private func showPreviewHelp(_ sender: Any?) {
     let alert = NSAlert()
-    alert.messageText = "Omarchy Installer"
+    alert.messageText = SmartRoomBrand.appName
     alert.informativeText =
       RecoveryActions.inRecovery
-      ? "Install or restore Omarchy startup software. The aura command is available in Recovery Terminal after opening this app."
+      ? "Install or restore \(SmartRoomBrand.osName) startup software. The aura command is available in Recovery Terminal after opening this app."
       : "This preview demonstrates the Recovery installation flow. Enter any text in the preview password field. No startup software, boot policy, or disk content is changed. Restart previews the Startup Disk handoff. Utilities → Terminal opens the real Terminal app."
     alert.runModal()
   }

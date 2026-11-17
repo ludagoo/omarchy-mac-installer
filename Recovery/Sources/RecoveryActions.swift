@@ -29,7 +29,7 @@ enum RecoveryActions {
   static var groupUUID: String { (try? configuration.get().groupUUID) ?? "" }
   static var prebootUUID: String { (try? configuration.get().prebootUUID) ?? "" }
   static var espUUID: String { (try? configuration.get().espUUID) ?? "" }
-  static var volumeName: String { (try? configuration.get().volumeName) ?? "Omarchy" }
+  static var volumeName: String { (try? configuration.get().volumeName) ?? SmartRoomBrand.osName }
   static var allowsCustomBootArguments: Bool {
     (try? configuration.get().allowCustomBootArguments) == true
   }
@@ -225,7 +225,8 @@ enum RecoveryActions {
     return owner
   }
   static func recoveryOnly() throws {
-    try check(inRecovery && geteuid() == 0, "Open Omarchy Installer in its paired Recovery.")
+    try check(
+      inRecovery && geteuid() == 0, "Open \(SmartRoomBrand.appName) in its paired Recovery.")
     try verifyVolume()
   }
   static func esp() throws -> URL {
@@ -564,7 +565,7 @@ enum RecoveryActions {
           guard let password, let owner else {
             throw RecoveryFailure(
               message:
-                "The startup selection changed. Try again to authorize Omarchy as the startup disk."
+                "The startup selection changed. Try again to authorize \(SmartRoomBrand.osName) as the startup disk."
             )
           }
           try RecoveryOwnerResolver.verify(owner, current: resolveOwner())
@@ -577,7 +578,9 @@ enum RecoveryActions {
         })
     } catch RecoveryBootRepair.Failure.selectionNotVerified {
       throw RecoveryFailure(
-        message: "Omarchy was not confirmed as the startup disk. The Mac has not been shut down.")
+        message:
+          "\(SmartRoomBrand.osName) was not confirmed as the startup disk. The Mac has not been shut down."
+      )
     }
     return true
   }
@@ -719,7 +722,7 @@ extension RecoveryActions {
         as? [String: Any],
       value["status"] as? String == "installed"
     else {
-      throw RecoveryFailure(message: "Complete Aurora installation first.")
+      throw RecoveryFailure(message: "Complete the \(SmartRoomBrand.osName) installation first.")
     }
     return value
   }

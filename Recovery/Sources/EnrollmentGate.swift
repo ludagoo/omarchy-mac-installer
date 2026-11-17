@@ -8,9 +8,9 @@ enum EnrollmentGateIssue: String, Error, Identifiable, LocalizedError {
 
   var title: String {
     switch self {
-    case .notRecovery: return "Open Aurora Installer in Recovery"
+    case .notRecovery: return "Open the installer in Recovery"
     case .rootRequired: return "Open the installer from Recovery"
-    case .wrongPair: return "Open Omarchy’s paired Recovery"
+    case .wrongPair: return "Open the paired Recovery"
     case .powerButtonRequired: return "Start Recovery with the power button"
     case .cannotVerify: return "Couldn’t verify the recovery environment"
     }
@@ -19,19 +19,19 @@ enum EnrollmentGateIssue: String, Error, Identifiable, LocalizedError {
     switch self {
     case .notRecovery:
       return
-        "Shut down, then hold the power button until Startup Options appears. Select Omarchy to finish setup."
+        "Shut down, then hold the power button until Startup Options appears. Select \(SmartRoomBrand.osName) to finish setup."
     case .rootRequired:
       return
-        "Launch Aurora Installer from Recovery’s Utilities menu or Terminal. No installation changes have been made."
+        "Launch \(SmartRoomBrand.appName) from Recovery’s Utilities menu or Terminal. No installation changes have been made."
     case .wrongPair:
       return
-        "This Recovery belongs to a different installation. Aurora will select Omarchy as the startup disk and shut down. Once powered off, hold the power button continuously until Startup Options appears, then select Omarchy."
+        "This Recovery belongs to a different installation. The installer will select \(SmartRoomBrand.osName) as the startup disk and shut down. Once powered off, hold the power button continuously until Startup Options appears, then select \(SmartRoomBrand.osName)."
     case .powerButtonRequired:
       return
-        "This is ordinary Recovery. Aurora will select Omarchy as the startup disk and shut down. Once powered off, hold the power button continuously until Startup Options appears, then select Omarchy. Do not press and release it first."
+        "This is ordinary Recovery. The installer will select \(SmartRoomBrand.osName) as the startup disk and shut down. Once powered off, hold the power button continuously until Startup Options appears, then select \(SmartRoomBrand.osName). Do not press and release it first."
     case .cannotVerify:
       return
-        "Aurora could not confirm that this is Omarchy’s paired power-button Recovery. No installation changes have been made. Restart into that Recovery and try again."
+        "The installer could not confirm that this is \(SmartRoomBrand.osName)’s paired power-button Recovery. No installation changes have been made. Restart into that Recovery and try again."
     }
   }
   var canRepairStartupSelection: Bool {
