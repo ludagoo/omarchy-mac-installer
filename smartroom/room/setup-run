@@ -13,7 +13,7 @@
 set -euo pipefail
 here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 fw=$here/firmware
-[[ -d $fw/overlay && -x $fw/bin/smartroomos-studio-setup && -f $here/authorized_keys ]] ||
+[[ -d $fw/overlay && -x $fw/bin/smartroomos-studio-setup && -f $here/authorized_keys && -f $here/smartroom-wired.nmconnection ]] ||
   { echo "setup: firmware/ or authorized_keys missing" >&2; exit 1; }
 
 excluded() {
