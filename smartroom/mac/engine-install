@@ -42,7 +42,7 @@ here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 repo=$here/../.. state=/var/root/omarchy-engine-install retry="" yes=0 readback=0
 payload="" sha="" metadata="" owner="" source="" size="" encrypt=0 lane=stable engine=""
 fbenv="" no_fbenv=0
-restore="/Applications/Omarchy Installer.app/Contents/Helpers/omarchy-restore-image"
+restore=""   # default: the app's helper, /Applications/<INSTALLER_APP_NAME>.app/Contents/Helpers
 while (( $# )); do
   case $1 in
     --yes) yes=1; shift; continue ;;
@@ -111,7 +111,9 @@ archive_name=$(lockval validation_artifact.filename)
 archive_size=$(lockval validation_artifact.size_bytes)
 archive_sha=$(lockval validation_artifact.sha256)
 decoder_id=$(conf INSTALLER_RESTORE_IMAGE_IDENTIFIER) team=$(conf INSTALLER_TEAM_ID) app_name=$(conf INSTALLER_APP_NAME)
-[[ -n $decoder_id && -n $team && -n $app_name ]] || die "cannot read the installer identity from $identity_conf"
+catalog_base=$(conf INSTALLER_CATALOG_BASE)
+[[ -n $decoder_id && -n $team && -n $app_name && -n $catalog_base ]] || die "cannot read the installer identity from $identity_conf"
+restore=${restore:-/Applications/$app_name.app/Contents/Helpers/omarchy-restore-image}
 archive=$state/engine/$archive_name
 mkdir -p "$state/engine"
 if [[ ! -f $archive || -n $engine ]]; then
@@ -120,7 +122,7 @@ if [[ ! -f $archive || -n $engine ]]; then
     cp "$engine" "$archive.incoming"
   else
     say "downloading engine $version"
-    curl -fsSL --retry 3 -o "$archive.incoming" "https://mac.omarchy.org/v1/engine/$version/$archive_name"
+    curl -fsSL --retry 3 -o "$archive.incoming" "$catalog_base/engine/$version/$archive_name"
   fi
   chmod 400 "$archive.incoming"
   mv -f "$archive.incoming" "$archive"

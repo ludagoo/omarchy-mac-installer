@@ -140,11 +140,17 @@ cat >"$mock/sysadminctl" <<'SH'
 [[ ${NO_TOKEN-} == "$2" ]] && { echo "Secure token is DISABLED for user $2" >&2; exit 0; }
 echo "$(date) sysadminctl[1:2] Secure token is ENABLED for user $2" >&2
 SH
-cat >"$mock/codesign" <<'SH'
+# the decoder's identifier, from identity.conf (the only place it is set)
+rid=$(sed -n 's/^INSTALLER_RESTORE_IMAGE_IDENTIFIER="\(.*\)"$/\1/p' "$src/Packaging/identity.conf")
+[[ -n $rid ]] || fail "no INSTALLER_RESTORE_IMAGE_IDENTIFIER in identity.conf"
+cat >"$mock/codesign" <<SH
 #!/bin/bash
+rid=$rid
+SH
+cat >>"$mock/codesign" <<'SH'
 case $1 in
-  -d) printf 'Executable=%s\nIdentifier=org.omarchy.installer.restore-image\nFormat=Mach-O thin (arm64)\nCodeDirectory v=20400 size=1 flags=0x2(adhoc) hashes=1+0 location=embedded\nSignature=adhoc\nCDHash=0123456789abcdef0123456789abcdef01234567\nTeamIdentifier=not set\n' "${@: -1}" >&2 ;;
-  --verify) [[ $3 == '-R=identifier "org.omarchy.installer.restore-image" and cdhash H"0123456789abcdef0123456789abcdef01234567"' ]] ;;
+  -d) printf 'Executable=%s\nIdentifier=%s\nFormat=Mach-O thin (arm64)\nCodeDirectory v=20400 size=1 flags=0x2(adhoc) hashes=1+0 location=embedded\nSignature=adhoc\nCDHash=0123456789abcdef0123456789abcdef01234567\nTeamIdentifier=not set\n' "${@: -1}" "$rid" >&2 ;;
+  --verify) [[ $3 == "-R=identifier \"$rid\" and cdhash H\"0123456789abcdef0123456789abcdef01234567\"" ]] ;;
   *) exit 1 ;;
 esac
 SH
@@ -164,7 +170,7 @@ chmod +x "$eng/Frameworks/Python.framework/Versions/3.13/bin/python3.13"
 for m in omarchy_contract omarchy_execution omarchy_planner omarchy_stage1 omarchy_image; do
   cp "$src/Engine/overlay/src/$m.py" "$eng/"
 done
-{ printf 'STATE = "%s"\nVOL = "%s"\n' "$state" "$t/vol"; cat <<'PY'
+{ printf 'STATE = "%s"\nVOL = "%s"\nRID = "%s"\n' "$state" "$t/vol" "$rid"; cat <<'PY'
 import json, os, sys, types
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 # The planner imports Asahi's osinstall/util for inventory collection only;
@@ -217,7 +223,7 @@ if mode == "plan":
 meta = json.load(open(env["OMARCHY_ENGINE_METADATA"]))["os_list"][0]
 assert os.path.basename(env["OMARCHY_ENGINE_PAYLOAD"]) == meta["package"]
 assert os.stat(env["OMARCHY_RESTORE_IMAGE"]).st_mode & 0o777 == 0o500
-assert env["OMARCHY_RESTORE_IMAGE_REQUIREMENT"].startswith('identifier "org.omarchy.installer.restore-image"')
+assert env["OMARCHY_RESTORE_IMAGE_REQUIREMENT"].startswith(f'identifier "{RID}"')
 assert env["DISTRO"] == "Omarchy" and env["OMARCHY_INSTALLER_NAME"]
 for leak in ("OMARCHY_RECOVERY_APP", "OMARCHY_RECOVERY_MANIFEST", "OMARCHY_RECOVERY_REQUIREMENT"):
     assert leak not in env, leak
