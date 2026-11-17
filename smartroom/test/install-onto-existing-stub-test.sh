@@ -56,7 +56,11 @@ printf '#!/bin/bash\necho 0\n' >"$mock/id"
 printf '#!/bin/bash\nshift 2; sha256sum "$@"\n' >"$mock/shasum"
 printf '#!/bin/bash\nexec bsdtar "$@"\n' >"$mock/tar"
 printf '#!/bin/bash\nexec cp -a "$@"\n' >"$mock/ditto"
-printf '#!/bin/bash\nexec /usr/bin/dd "${@/bs=4m/bs=4M}" status=none\n' >"$mock/dd"   # BSD dd takes 4m
+cat >"$mock/dd" <<'SH'   # BSD dd takes 64k/1m; GNU dd wants 64K/1M
+#!/bin/bash
+args=(); for a in "$@"; do [[ $a =~ ^([io]?bs)=([0-9]+)([km])$ ]] && a="${BASH_REMATCH[1]}=${BASH_REMATCH[2]}${BASH_REMATCH[3]^^}"; args+=("$a"); done
+exec /usr/bin/dd "${args[@]}" status=none
+SH
 cat >"$mock/newfs_msdos" <<SH
 #!/bin/bash
 echo "\$*" >>$t/newfs.log; rm -rf $t/vol/disk0s4; mkdir -p $t/vol/disk0s4
