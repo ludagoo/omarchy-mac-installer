@@ -46,6 +46,9 @@ version=$(date -u +%Y.%m.%d)
   cat "$packages/SOURCE"
   printf 'bootloader=limine\n'
 } >"$dir/setup/build-info"
+# Our packages keep their version across same-day rebuilds: never let the
+# package cache hand pacman an older build under the same file name.
+for f in "$packages"/repo/*.pkg.tar.*; do rm -f "$cache/pkg/${f##*/}"; done
 cd "$here/.."
 image-builder/bin/build-mac-image --inputs "$inputs" --recovery-app "$recovery" --cache "$cache" --smartroom "$dir" "$out"
 cp "$dir/setup/build-info" "$out/build-info.txt"
