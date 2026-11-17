@@ -28,6 +28,13 @@ every other Mac, the Studio included, Omarchy's Engine installs its own
 - if it stays silent, stage 1 is the one non-Omarchy piece left, and the next
   step is a fresh Omarchy stub (Engine install + 1TR), not more debugging.
 
+## Payloads (built 2026-11-17 on studio-build, staged on the Mini)
+
+| | file (in `lucas@192.168.1.62:/home/lucas/smartroom-omarchy-fork/release/`) | sha256 |
+| --- | --- | --- |
+| stock Omarchy (baseline) | `baseline/omarchy-2026.11.17-aarch64-apple-silicon-mac-stable-os-package.zip` | `f1ba37b13a1c7d265171584f834a9f9b21336097fbb55b066721a942ae263d7c` |
+| SmartRoom Firmware | `smartroom/smartroom-firmware-2026.11.17-aarch64-apple-silicon-mac-stable-os-package.zip` | `787e640cde745c47e9652f68a01e398246feeaded54186cec7c627547cdb9e84` |
+
 ## Steps (Claude, on macOS over SSH as the owner account)
 
 ```sh
