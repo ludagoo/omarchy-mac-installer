@@ -1,0 +1,514 @@
+#!/bin/bash
+# Headless driver for the Omarchy Mac installer's pinned Python Engine: a fresh
+# install of a local OS image (zip + installer_data.json) on this Apple Silicon
+# Mac, over SSH, without the Swift app or a signed catalog. macOS only, as root.
+# Runs the engine exactly as PinnedAsahiEngineExecutor.swift does (inspect,
+# plan, install: same environment, files, modes and digests), then writes the
+# ESP's omarchy/install.conf as LiveInstallerEnvironment.swift does.
+# How it works and what is unverified: smartroom/docs/engine-headless.md.
+#
+#   engine-install --payload ZIP --sha256 HEX --installer-data JSON --owner USER \
+#     [--restore-image PATH] [--source diskNsM] [--size BYTES|nM|nG|nT] \
+#     [--encrypt 0|1] [--lane stable|rc|edge] [--engine ARCHIVE] [--full-readback] \
+#     [--repo DIR] [--state DIR] [--yes]
+#   engine-install --retry RUN_DIR [--repo DIR] [--state DIR] --yes
+#
+# The owner's macOS password is the first line of standard input. It is only
+# ever written to the engine's standard input, never to argv, env or a file.
+# Without --yes it stops after the engine's plan; nothing on disk changes.
+# --retry repeats only the Recovery authorization (bless) of a run that
+# stopped there, as the app's retry does.
+# The engine pin comes from REPO/Engine/source-lock.json and the decoder's
+# identity from REPO/Packaging/identity.conf (REPO defaults to this checkout).
+set -euo pipefail
+export LC_ALL=C LANG=C
+PATH=/usr/bin:/bin:/usr/sbin:/sbin
+umask 077          # as the privileged helper (OmarchyAppleInstallerHelper/main.swift)
+trap '' HUP PIPE   # a dropped SSH session must not stop the engine mid-write
+die() { echo "engine-install: $*" >&2; exit 1; }
+say() { echo "== $*"; }
+
+here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+repo=$here/../.. state=/var/root/omarchy-engine-install retry="" yes=0 readback=0
+payload="" sha="" metadata="" owner="" source="" size="" encrypt=0 lane=stable engine=""
+restore="/Applications/Omarchy Installer.app/Contents/Helpers/omarchy-restore-image"
+while (( $# )); do
+  case $1 in
+    --yes) yes=1; shift; continue ;;
+    --full-readback) readback=1; shift; continue ;;
+  esac
+  (( $# >= 2 )) || die "unknown or incomplete argument: $1"
+  case $1 in
+    --payload) payload=$2 ;; --sha256) sha=$2 ;; --installer-data) metadata=$2 ;;
+    --owner) owner=$2 ;; --restore-image) restore=$2 ;; --source) source=$2 ;;
+    --size) size=$2 ;; --encrypt) encrypt=$2 ;; --lane) lane=$2 ;; --engine) engine=$2 ;;
+    --repo) repo=$2 ;; --state) state=$2 ;; --retry) retry=$2 ;;
+    *) die "unknown argument: $1" ;;
+  esac
+  shift 2
+done
+[[ $(uname -s) == Darwin && $(uname -m) == arm64 ]] || die "this runs on an Apple Silicon Mac"
+(( EUID == 0 )) || die "run as root (sudo)"
+lock=$repo/Engine/source-lock.json identity_conf=$repo/Packaging/identity.conf
+[[ -f $lock && -f $identity_conf ]] || die "no $lock or $identity_conf (--repo names the checkout)"
+
+if [[ -n $retry ]]; then
+  run=$(cd -- "$retry" && pwd) || die "no run directory $retry"
+  [[ -f $run/params ]] || die "$run is not an engine-install run"
+  param() { sed -n "s/^$1=//p" "$run/params"; }
+  owner=$(param owner) encrypt=$(param encrypt) lane=$(param lane) readback=$(param readback)
+  payload_name=$(param payload)
+else
+  [[ -f $payload && -f $metadata && -n $owner ]] || die "missing --payload, --installer-data or --owner"
+  sha=$(tr '[:upper:]' '[:lower:]' <<<"$sha")
+  re='^[0-9a-f]{64}$'; [[ $sha =~ $re ]] || die "--sha256 is the payload's 64 hex digit SHA-256"
+  re='^[A-Za-z0-9._-]+$'; [[ $owner =~ $re && ${#owner} -le 255 ]] || die "--owner is a macOS short user name"
+  case $encrypt in 0|1) ;; *) die "--encrypt is 0 or 1" ;; esac
+  case $lane in stable|rc|edge) ;; *) die "--lane is stable, rc or edge" ;; esac
+  mkdir -p "$state"; chmod 700 "$state"
+  run=$state/run-$(date +%Y%m%d-%H%M%S)
+  mkdir -m 700 "$run"
+fi
+pkg=$run/package
+exec > >(tee -a "$run/engine-install.log") 2>&1
+say "run $run ($(date))"
+
+# The owner's password: one line on stdin, held only in this shell variable.
+[[ -t 0 ]] && printf 'Password for %s: ' "$owner"
+IFS= read -r -s password || [[ -n ${password-} ]] || die "no owner password on standard input"
+[[ -t 0 ]] && echo
+[[ -n $password && ${#password} -le 1024 && $password != *$'\r'* ]] || die "the owner password is empty or invalid"
+
+# The engine the lock pins, verified by size and SHA-256 before every use.
+lockval() { plutil -extract "$1" raw -o - "$lock" || die "cannot read $1 from $lock"; }
+conf() { sed -n "s/^$1=\"\\(.*\\)\"\$/\\1/p" "$identity_conf"; }
+version=$(lockval downstream_overlay.version)
+archive_name=$(lockval validation_artifact.filename)
+archive_size=$(lockval validation_artifact.size_bytes)
+archive_sha=$(lockval validation_artifact.sha256)
+decoder_id=$(conf INSTALLER_RESTORE_IMAGE_IDENTIFIER) team=$(conf INSTALLER_TEAM_ID) app_name=$(conf INSTALLER_APP_NAME)
+[[ -n $decoder_id && -n $team && -n $app_name ]] || die "cannot read the installer identity from $identity_conf"
+archive=$state/engine/$archive_name
+mkdir -p "$state/engine"
+if [[ ! -f $archive || -n $engine ]]; then
+  rm -f "$archive.incoming"
+  if [[ -n $engine ]]; then
+    cp "$engine" "$archive.incoming"
+  else
+    say "downloading engine $version"
+    curl -fsSL --retry 3 -o "$archive.incoming" "https://mac.omarchy.org/v1/engine/$version/$archive_name"
+  fi
+  chmod 400 "$archive.incoming"
+  mv -f "$archive.incoming" "$archive"
+fi
+[[ $(stat -f %z "$archive") == "$archive_size" ]] || die "$archive is not $archive_size bytes"
+[[ $(shasum -a 256 "$archive" | awk '{print $1}') == "$archive_sha" ]] || die "$archive does not have the locked SHA-256 (delete it to fetch it again)"
+listing=$(tar -tzf "$archive")
+! grep -Eq '^/|(^|/)\.\.(/|$)' <<<"$listing" || die "the engine archive has unsafe entries"
+engine_digest=sha256:$archive_sha
+say "engine $version ($archive_name, verified)"
+
+pyrel=Frameworks/Python.framework/Versions/3.13/bin/python3.13
+extract() { # DIR: a fresh private copy of the engine, as the app unpacks it
+  mkdir -m 700 "$1" "$1/bundle"
+  tar -xzf "$archive" -C "$1/bundle" --no-same-owner --no-same-permissions
+  [[ -x $1/bundle/$pyrel && -f $1/bundle/main.py ]] || die "the engine archive has no $pyrel or main.py"
+}
+set_base_env() { # BUNDLE HOME JOURNAL: PinnedAsahiEngineExecutor.environment(...)
+  base=(HOME="$2" TMPDIR="$2" PATH="$1/bin:/usr/bin:/bin:/usr/sbin:/sbin" LC_ALL=C LANG=C
+    DYLD_LIBRARY_PATH="$1/Frameworks/Python.framework/Versions/Current/lib"
+    DYLD_FRAMEWORK_PATH="$1/Frameworks"
+    SSL_CERT_FILE="$1/Frameworks/Python.framework/Versions/Current/etc/openssl/cert.pem"
+    OMARCHY_ENGINE_JOURNAL="$3" OMARCHY_PERFORMANCE_LOG="$3.performance.jsonl")
+}
+engine() { # ROOT JOURNAL NAME=value...: python3.13 main.py from inside the bundle
+  local root=$1 bundle=$1/bundle journal=$2
+  shift 2
+  set_base_env "$bundle" "$root" "$journal"
+  (cd "$bundle" && exec env -i "${base[@]}" "$@" "$bundle/$pyrel" "$bundle/main.py")
+}
+new_root() { echo "$run/engine-execution-$(uuidgen | tr '[:upper:]' '[:lower:]')"; }
+keep_log() { # ROOT NAME: keep the run's installer.log, then remove the root (as the app does)
+  [[ ! -f $1/bundle/installer.log ]] || cp "$1/bundle/installer.log" "$run/$2-installer.log"
+  rm -rf "$1"
+}
+
+# The engine's own Python runs this driver's JSON, digest and diskutil plist steps.
+tools=$run/tools
+rm -rf "$tools"
+extract "$tools"
+trap 'rm -rf "$tools"' EXIT
+IFS= read -r -d '' PYHELPER <<'PY' || true
+import hashlib, json, os, plistlib, re, subprocess, sys, time, unicodedata
+
+def die(message):
+    sys.stderr.write("engine-install: " + message + "\n")
+    sys.exit(1)
+
+def records(path):
+    try:
+        with open(path, "rb") as source:
+            return [json.loads(line) for line in source.read().splitlines() if line]
+    except FileNotFoundError:
+        return []
+
+def payload(recs, kind):
+    found = [r["payload"] for r in recs if r["type"] == kind]
+    return found[-1] if found else None
+
+def write_private(path, value):
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o400)
+    with os.fdopen(fd, "wb") as target:
+        target.write(json.dumps(value, sort_keys=True, separators=(",", ":")).encode())
+
+def length_prefixed(fields):  # InstallerDigest.lengthPrefixedSHA256
+    canonical = "|".join(f"{len(f.encode())}:{f}" for f in fields)
+    return "sha256:" + hashlib.sha256(canonical.encode()).hexdigest()
+
+def choose(transcript, out, source, size):
+    recs = records(transcript)
+    inspection = payload(recs, "inspection") or {}
+    if inspection.get("support") != "supported":
+        die(f"the engine does not support this Mac: {inspection}")
+    inventory = payload(recs, "inventory") or die("the engine reported no disk inventory")
+    candidates = inventory["candidates"]
+    for c in candidates:
+        print(f"  {c['kind']:7} {c['source_identifier']:10} offset {c['offset_bytes']} length "
+              f"{c['length_bytes']} (install needs {c['minimum_install_bytes']}, macOS keeps "
+              f"{c['minimum_container_bytes']})")
+    if source:
+        picked = [c for c in candidates if c["source_identifier"] == source
+                  and c["kind"] in ("free", "resize")]
+        if len(picked) != 1:
+            die(f"--source {source} is not one free or resize candidate")
+        chosen = picked[0]
+    else:
+        existing = [c["source_identifier"] for c in candidates if c["kind"] == "replace"]
+        if existing:
+            die("an existing install is on this disk (" + ", ".join(existing)
+                + "); remove it first, or name a candidate with --source")
+        free = sorted((c for c in candidates if c["kind"] == "free"),
+                      key=lambda c: -c["length_bytes"])
+        if not free:
+            die("no free extent can hold the image; free space, or shrink macOS"
+                " with --source <its container> --size N")
+        if len(free) > 1 and free[0]["length_bytes"] == free[1]["length_bytes"]:
+            die("two free extents are equally large; choose one with --source")
+        chosen = free[0]
+    if size:
+        match = re.fullmatch(r"([0-9]+)([MGT]?)", size) or die("--size is BYTES or a number with M, G or T (MiB, GiB, TiB)")
+        length = int(match[1]) << {"": 0, "M": 20, "G": 30, "T": 40}[match[2]]
+    elif chosen["kind"] == "free":
+        length = chosen["length_bytes"]
+    else:
+        die("shrinking macOS needs --size")
+    write_private(out, {"schema_version": 1, "layout_digest": inventory["layout_digest"],
+                        "candidate_kind": chosen["kind"],
+                        "source_identifier": chosen["source_identifier"],
+                        "requested_length_bytes": length})
+    print(f"chosen: {chosen['kind']} {chosen['source_identifier']}, {length} bytes ({length / (1 << 30):.1f} GiB)")
+
+def plan_identity(out, version, engine_digest, metadata_digest, payload_digest):
+    write_private(out, {"schema_version": 1, "engine_version": version, "engine_digest": engine_digest,
+                        "metadata_digest": metadata_digest, "payload_digest": payload_digest})
+
+def install_files(transcript, package, engine_digest, metadata_digest, payload_digest, sequence, payload_name):
+    plan = payload(records(transcript), "plan") or die("the engine wrote no plan")
+    for key, value in (("engine_digest", engine_digest), ("metadata_digest", metadata_digest),
+                       ("payload_digest", payload_digest)):
+        if plan[key] != value:
+            die(f"the plan's {key} is not this run's")
+    # No signed catalog: a local, unsigned record of what the plan binds stands in
+    # for the catalog payload, and an all-zero fingerprint for its trust root.
+    write_private(os.path.join(package, "catalog-local.json"), {
+        "schemaVersion": 1, "sequence": int(sequence), "signed": False,
+        "deviceIdentifier": plan["device_identifier"], "engineVersion": plan["engine_version"],
+        "engineDigest": engine_digest, "metadataDigest": metadata_digest,
+        "payloadDigest": payload_digest, "payloadFileName": payload_name})
+    with open(os.path.join(package, "catalog-local.json"), "rb") as source:
+        catalog_digest = "sha256:" + hashlib.sha256(source.read()).hexdigest()
+    trust_root = "sha256:" + "0" * 64
+    binding = length_prefixed([  # CandidateBoundPlanIdentity.bindingDigest
+        "omarchy.apple.candidate-bound-plan", "1", trust_root, str(sequence), catalog_digest,
+        plan["plan_digest"], plan["device_identifier"], plan["store_identifier"],
+        plan["layout_digest"], plan["candidate_kind"], plan["source_identifier"],
+        str(plan["offset_bytes"]), str(plan["length_bytes"]), plan["engine_digest"],
+        plan["metadata_digest"], plan["payload_digest"]])
+    request = {"format": 1, "operation": "install"}
+    for key in ("plan_digest", "device_identifier", "store_identifier", "layout_digest",
+                "candidate_kind", "source_identifier", "offset_bytes", "length_bytes",
+                "engine_version", "required_human_steps"):
+        request[key] = plan[key]
+    write_private(os.path.join(package, "request.json"), request)
+    write_private(os.path.join(package, "identity.json"), {
+        "format": 1, "binding_digest": binding, "trust_root_fingerprint": trust_root,
+        "catalog_sequence": int(sequence), "catalog_payload_digest": catalog_digest,
+        "plan_digest": plan["plan_digest"], "engine_digest": engine_digest,
+        "metadata_digest": metadata_digest, "payload_digest": payload_digest})
+
+def bound(package):  # binding, plan digest and extent of a prepared package
+    with open(os.path.join(package, "identity.json")) as source:
+        identity = json.load(source)
+    with open(os.path.join(package, "request.json")) as source:
+        request = json.load(source)
+    print(identity["binding_digest"], request["plan_digest"], request["store_identifier"],
+          request["offset_bytes"], request["length_bytes"])
+
+def describe(record):
+    p = record["payload"]
+    detail = {
+        "inspection": lambda: f"{p['device_identifier']} {p['support']}",
+        "inventory": lambda: f"{len(p['candidates'])} candidates on {p['system_store_identifier']}",
+        "plan": lambda: f"{p['candidate_kind']} {p['source_identifier']} offset {p['offset_bytes']} length {p['length_bytes']}",
+        "event": lambda: p["name"],
+        "checkpoint": lambda: f"{p['identifier']} ({p['phase']})",
+        "completion": lambda: p["outcome"],
+    }.get(record["type"], lambda: "")()
+    return f"journal {record['sequence']}: {record['type']} {detail}"
+
+def follow(journal, stop):
+    offset, pending = 0, b""
+    while True:
+        stopping = os.path.exists(stop)
+        try:
+            with open(journal, "rb") as source:
+                source.seek(offset)
+                chunk = source.read()
+        except FileNotFoundError:
+            chunk = b""
+        offset += len(chunk)
+        *lines, pending = (pending + chunk).split(b"\n")
+        for line in lines:
+            print(describe(json.loads(line)), flush=True)
+        if stopping:
+            return
+        time.sleep(0.5)
+
+def status(journal):
+    recs = records(journal)
+    outcome = payload(recs, "completion")
+    events = [r["payload"]["name"] for r in recs if r["type"] == "event"]
+    print((outcome or {}).get("outcome", "-"), events[-1] if events else "-")
+
+def unfinished(*journals):
+    for journal in journals:
+        if journal.endswith(".performance.jsonl"):
+            continue
+        recs = records(journal)
+        if any(r["type"] == "event" for r in recs) and not payload(recs, "completion"):
+            print(journal)
+
+def meta(path):  # OS name, its ESP label as osinstall.partition_disk makes it, Recovery GUI, package
+    with open(path) as source:
+        templates = [t for t in json.load(source)["os_list"]
+                     if t.get("omarchy_target") == "apple-silicon-full-os"]
+    if len(templates) != 1:
+        die(f"{path} has no single Omarchy full-OS target")
+    name = templates[0]["default_os_name"]
+    label = ("EFI - " + name).translate(str.maketrans("", "", '*?/\\|,;:+=<>[]"'))
+    label = unicodedata.normalize("NFKD", label).encode("ascii", "ignore").decode("ascii")[:11]
+    print(name, label, templates[0].get("recovery_gui") or "-", templates[0].get("package"), sep="\n")
+
+def admins(path):  # the users AdminUserRecoveryInfo.plist names (osenum admin_users)
+    with open(path, "rb") as source:
+        print("\n".join(plistlib.load(source)))
+
+def find_esp(store, offset, length, label):  # InstallConfESPLocator.identify
+    def plist(*args):
+        return plistlib.loads(subprocess.run(["/usr/sbin/diskutil", *args], check=True,
+                                             stdout=subprocess.PIPE).stdout)
+    start, end = int(offset), int(offset) + int(length)
+    disks = [d for d in plist("list", "-plist", store).get("AllDisksAndPartitions", [])
+             if d.get("DeviceIdentifier") == store]
+    found = []
+    for part in (disks[0].get("Partitions", []) if len(disks) == 1 else []):
+        name = part.get("DeviceIdentifier", "")
+        info = plist("info", "-plist", name)
+        first, size = info.get("PartitionMapPartitionOffset", 0), info.get("Size", 0)
+        if (info.get("ParentWholeDisk") == store and info.get("Content") in ("EFI", "EFI System Partition")
+                and (info.get("VolumeName") or "").upper() == label.upper()
+                and size > 0 and start <= first and first + size <= end
+                and re.fullmatch(re.escape(store) + r"s[0-9]+", name)):
+            found.append(name)
+    if len(found) != 1:
+        die(f"found {len(found)} ESPs named {label} inside the installed extent on {store}")
+    print(found[0])
+
+command, arguments = sys.argv[1], sys.argv[2:]
+{"choose": choose, "plan-identity": plan_identity, "install-files": install_files,
+ "bound": bound, "follow": follow, "status": status, "unfinished": unfinished,
+ "meta": meta, "admins": admins, "find-esp": find_esp}[command](*arguments)
+PY
+py() {
+  env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin LC_ALL=C LANG=C \
+    DYLD_LIBRARY_PATH="$tools/bundle/Frameworks/Python.framework/Versions/Current/lib" \
+    DYLD_FRAMEWORK_PATH="$tools/bundle/Frameworks" \
+    "$tools/bundle/$pyrel" -I -c "$PYHELPER" "$@"
+}
+
+# Never start a second install while an earlier one is unfinished.
+unfinished=$(py unfinished "$state"/run-*/execution-journals/*.jsonl)
+[[ -n $retry || -z $unfinished ]] || die "an earlier install is unfinished: $unfinished
+  If it stopped at Recovery authorization, rerun with --retry <its run directory>; otherwise inspect it first."
+
+# What the engine checks only once it has begun (main.py's console user, check_cur_os
+# in prepare_target, omarchy_recovery.source_bootstrap after partitioning), checked here first.
+console=$(scutil <<<'show State:/Users/ConsoleUser' | sed -n 's/^.*kCGSSessionUserNameKey : //p' | sed '/^_mbsetupuser$/d' | tail -n 1)
+[[ -n $console && $console != unknown ]] || die "no user is logged in at this Mac's console. The engine refuses
+  (upstream main.py: 'Perhaps you are running this installer over SSH?'). Log $owner in at the console
+  (automatic login, or Screen Sharing) and leave the session open; SSH may then drive the install."
+group=$(diskutil info -plist / | plutil -extract APFSVolumeGroupID raw -o - -) || die "cannot read this macOS's volume group"
+admin_list=$(py admins "/System/Volumes/Preboot/$group/var/db/AdminUserRecoveryInfo.plist") || die "cannot read this macOS's Preboot admin list"
+for user in "$console" "$owner"; do
+  grep -qxF "$user" <<<"$admin_list" || die "$user is not a macOS machine owner (not in Preboot's AdminUserRecoveryInfo.plist; try 'diskutil apfs updatePreboot /')"
+done
+token=$(sysadminctl -secureTokenStatus "$owner" 2>&1 || true)
+[[ $token == *ENABLED* ]] || die "$owner has no secure token, so is no APFS volume owner: $token"
+say "console user $console, machine owner $owner"
+
+if [[ -z $retry ]]; then
+  mkdir -m 700 "$pkg"
+  # The app's signed decoder, copied private and executable as the helper imports it,
+  # and the requirement the helper would hold it to (RestoreImageHelper.swift).
+  [[ -f $restore ]] || die "no restore-image helper at $restore (see smartroom/docs/engine-headless.md)"
+  cp "$restore" "$pkg/omarchy-restore-image"
+  chmod 500 "$pkg/omarchy-restore-image"
+  signature=$(codesign -d --verbose=4 "$pkg/omarchy-restore-image" 2>&1) || die "the restore-image helper is not signed"
+  [[ $(sed -n 's/^Identifier=//p' <<<"$signature") == "$decoder_id" ]] || die "the restore-image helper is not $decoder_id"
+  if [[ $signature == *Signature=adhoc* ]]; then
+    requirement="identifier \"$decoder_id\" and cdhash H\"$(sed -n 's/^CDHash=//p' <<<"$signature")\""
+  else
+    [[ $(sed -n 's/^TeamIdentifier=//p' <<<"$signature") == "$team" ]] || die "the restore-image helper is not signed by team $team"
+    requirement="anchor apple generic and identifier \"$decoder_id\" and certificate 1[field.1.2.840.113635.100.6.2.6]"
+    requirement+=" and certificate leaf[field.1.2.840.113635.100.6.1.13] and certificate leaf[subject.OU] = \"$team\""
+  fi
+  codesign --verify --strict -R="$requirement" "$pkg/omarchy-restore-image" || die "the restore-image helper does not satisfy: $requirement"
+  printf '%s\n' "$requirement" >"$pkg/restore-image.requirement"
+  say "restore-image helper: $requirement"
+
+  cp "$metadata" "$pkg/installer_data.json"
+  chmod 400 "$pkg/installer_data.json"
+  metadata_digest=sha256:$(shasum -a 256 "$pkg/installer_data.json" | awk '{print $1}')
+  payload_name=$(basename "$payload") payload_digest=sha256:$sha
+  # The engine refuses this only in its install preflight; say so before anything runs.
+  [[ $(py meta "$pkg/installer_data.json" | sed -n 4p) == "$payload_name" ]] ||
+    die "$metadata's package is not $payload_name; the engine requires the payload to have that name"
+
+  say "1/3 engine inspection"
+  root=$(new_root); extract "$root"
+  if engine "$root" "$root/transcript.jsonl" OMARCHY_ENGINE_MODE=inspect </dev/null; then rc=0; else rc=$?; fi
+  cp "$root/transcript.jsonl" "$run/inspect.jsonl" 2>/dev/null || true
+  keep_log "$root" inspect
+  (( rc == 0 )) || die "the engine's inspection failed (exit $rc); see above and $run/inspect-installer.log"
+  mkdir -m 700 "$run/plan-input"
+  py choose "$run/inspect.jsonl" "$run/plan-input/request.json" "$source" "$size"
+
+  say "copying and verifying the payload"
+  cp -c "$payload" "$pkg/$payload_name" 2>/dev/null || cp "$payload" "$pkg/$payload_name"
+  chmod 400 "$pkg/$payload_name"
+  [[ $(shasum -a 256 "$pkg/$payload_name" | awk '{print $1}') == "$sha" ]] || die "$payload does not have SHA-256 $sha"
+
+  say "2/3 engine plan"
+  py plan-identity "$run/plan-input/identity.json" "$version" "$engine_digest" "$metadata_digest" "$payload_digest"
+  root=$(new_root); extract "$root"
+  if engine "$root" "$root/transcript.jsonl" OMARCHY_ENGINE_MODE=plan \
+    OMARCHY_ENGINE_REQUEST="$run/plan-input/request.json" OMARCHY_ENGINE_IDENTITY="$run/plan-input/identity.json" </dev/null
+  then rc=0; else rc=$?; fi
+  cp "$root/transcript.jsonl" "$run/plan.jsonl" 2>/dev/null || true
+  keep_log "$root" plan
+  (( rc == 0 )) || die "the engine's plan failed (exit $rc); see above and $run/plan-installer.log"
+  py install-files "$run/plan.jsonl" "$pkg" "$engine_digest" "$metadata_digest" "$payload_digest" "$(date +%s)" "$payload_name"
+  printf 'owner=%s\nencrypt=%s\nlane=%s\nreadback=%s\npayload=%s\n' "$owner" "$encrypt" "$lane" "$readback" "$payload_name" >"$run/params"
+  mkdir -m 700 "$run/execution-journals"
+fi
+
+requirement=$(cat "$pkg/restore-image.requirement")
+bound=$(py bound "$pkg")
+read -r binding plan_digest store offset length <<<"$bound"
+journal=$run/execution-journals/${binding#sha256:}.jsonl
+[[ -z $retry || -s $journal ]] || die "$run has no install journal to retry"
+os_meta=$(py meta "$pkg/installer_data.json")
+os_name=$(sed -n 1p <<<"$os_meta") esp_label=$(sed -n 2p <<<"$os_meta") recovery_gui=$(sed -n 3p <<<"$os_meta")
+say "plan $plan_digest: $length bytes at offset $offset on $store for $os_name ($payload_name), install.conf encrypt=$encrypt lane=$lane"
+if (( ! yes )); then
+  [[ -n $retry ]] || rm -f "$pkg/$payload_name"
+  echo "checked; nothing on disk changed. Add --yes to install."
+  exit 0
+fi
+
+mode=install
+[[ -z $retry ]] || mode=retry-recovery-authorization
+say "3/3 engine $mode (journal $journal)"
+[[ -e $journal ]] || : >"$journal"
+install_env=(OMARCHY_ENGINE_MODE="$mode" OMARCHY_ENGINE_REQUEST="$pkg/request.json"
+  OMARCHY_ENGINE_IDENTITY="$pkg/identity.json" OMARCHY_ENGINE_METADATA="$pkg/installer_data.json"
+  OMARCHY_ENGINE_PAYLOAD="$pkg/$payload_name" OMARCHY_ENGINE_BINDING_DIGEST="$binding"
+  OMARCHY_ENGINE_PLAN_DIGEST="$plan_digest" OMARCHY_MACHINE_OWNER="$owner" DISTRO=Omarchy
+  OMARCHY_INSTALLER_NAME="$app_name" DISTRO_DOCS=https://omarchy.org/manual/
+  OMARCHY_RESTORE_IMAGE="$pkg/omarchy-restore-image" OMARCHY_RESTORE_IMAGE_REQUIREMENT="$requirement")
+if (( readback )); then install_env+=(OMARCHY_FULL_READBACK=1); fi
+caffeinate -i -s -w $$ </dev/null >/dev/null 2>&1 &
+rm -f "$run/.follow-stop"
+py follow "$journal" "$run/.follow-stop" &
+follower=$!
+root=$(new_root); extract "$root"
+if printf '%s\n' "$password" | engine "$root" "$journal" "${install_env[@]}"; then rc=0; else rc=$?; fi
+password=""
+: >"$run/.follow-stop"
+wait "$follower" || true
+rm -f "$run/.follow-stop"
+keep_log "$root" "$mode"
+journal_status=$(py status "$journal")
+read -r outcome last_event <<<"$journal_status"
+if (( rc != 0 )) || [[ $outcome != awaiting_recovery ]]; then
+  if [[ $outcome == - && $last_event == recovery_handoff_started ]]; then
+    die "the engine wrote $os_name but could not authorize it as the startup disk (wrong password?).
+  Retry only that step, with the password on stdin again: sudo $0 --retry $run --yes"
+  fi
+  die "the engine stopped (exit $rc, outcome $outcome, last stage $last_event). Do not rerun a fresh install;
+  read $run/engine-install.log and $run/$mode-installer.log, and smartroom/docs/engine-headless.md."
+fi
+
+say "writing omarchy/install.conf on the new ESP"
+esp=$(py find-esp "$store" "$offset" "$length" "$esp_label")
+mount_point=$(diskutil info -plist "$esp" | plutil -extract MountPoint raw -o - - 2>/dev/null || true)
+if [[ -z $mount_point ]]; then
+  mount_point=$run/esp
+  mkdir -p "$mount_point"
+  diskutil mount -mountPoint "$mount_point" "$esp" >/dev/null
+fi
+(
+  umask 022
+  mkdir -p "$mount_point/omarchy"
+  printf 'format=1\nencrypt=%s\nlane=%s\n' "$encrypt" "$lane" >"$mount_point/omarchy/.install.conf.tmp"
+  mv -f "$mount_point/omarchy/.install.conf.tmp" "$mount_point/omarchy/install.conf"
+)
+sync
+printf 'format=1\nencrypt=%s\nlane=%s\n' "$encrypt" "$lane" | cmp -s - "$mount_point/omarchy/install.conf" ||
+  die "omarchy/install.conf on $esp did not read back; write it by hand before step 2"
+rm -f "$mount_point/omarchy/._install.conf" "$mount_point/._omarchy"
+diskutil unmount "$esp" >/dev/null || echo "warning: could not unmount $esp"
+echo "$esp ($esp_label): omarchy/install.conf encrypt=$encrypt lane=$lane"
+
+if [[ $recovery_gui == omarchy-native-v1 ]]; then
+  step="The $app_name Recovery app opens (Finish setup). Enter $owner's macOS password and choose Install;
+     follow it to the end, then Restart."
+else
+  step="Recovery opens a Terminal running the second step. Answer y, enter $owner's password when asked;
+     it restarts when done."
+fi
+cat <<EOF
+== Stage 1 done: the engine's journal ends awaiting_recovery.
+$os_name is now this Mac's startup disk (the engine blessed it, not --nextonly).
+Do NOT reboot from SSH: a normal start now opens $os_name's Recovery, where there is
+no SSH, until a person finishes step 2 at the Mac (display, or VoiceOver):
+  1. Shut down (sudo shutdown -h now is fine).
+  2. Press and hold the power button (Mac Studio and mini: on the back) until
+     "Loading startup options" appears.
+  3. Choose "$os_name" and click Continue. If Recovery asks for a volume to
+     recover, choose macOS and authenticate as $owner.
+  4. $step
+To go back to macOS instead: hold the power button, choose the macOS disk, then
+Option-click "Always Use" (or Startup Disk in Recovery).
+Run record (journal, logs, package; the payload copy is a clone): $run
+EOF
