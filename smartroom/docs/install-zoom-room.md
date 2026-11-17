@@ -219,7 +219,7 @@ can: there is no MDM command or declaration for the startup disk, the
 bootstrap token does not authorize `bless`, `nvram boot-volume` is not
 writable from macOS (XNU allows it only to Apple-entitled processes), and
 `systemsetup -setstartupdisk` does not work on Apple Silicon. Research with
-sources: `research-bless-unattended.md` (job notes, 2026-11-17).
+sources: [research-bless-unattended.md](research-bless-unattended.md) (2026-11-17).
 
 The options, for Lucas to choose:
 
