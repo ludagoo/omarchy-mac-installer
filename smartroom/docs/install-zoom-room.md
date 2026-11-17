@@ -73,16 +73,21 @@ On the Mac (or through Jamf):
 --size N`) or from free space. N is the whole SmartRoom Firmware install: the
 stub (2.5 GB), the ESP (500 MiB), Boot (2 GiB) and Root (the rest).
 
-| Size | |
-| --- | --- |
-| ~38.5 GB | The engine's floor: Root's 32 GiB minimum from `installer_data.json` |
-| ~75 GB | What Asahi recommends for updates (Root twice its minimum) |
-| **80 GiB** | **Recommended for a room**: room program, Chromium cache, logs and Omarchy's snapshots, with room for our releases |
+Lucas's rule (2026-11-07, restated 2026-11-17): **macOS keeps only what it needs; SmartRoom
+Firmware gets the rest of the disk.** macOS stays only for the Zoom Rooms transition.
 
-The engine also refuses to shrink macOS below what macOS itself needs
-(`minimum_container_bytes` in the dry run's candidate list). Zoom Rooms on
-macOS needs its own room to update: on a 256 GB Mac mini, 80 GiB still
-leaves macOS about 150 GB.
+- The dry run lists the macOS container with `minimum_container_bytes` (what macOS itself needs;
+  about 77.5 GB on the M2 Max Studio with macOS 14.5).
+- Leave macOS that minimum plus about 20 GB for its own updates, and give the rest to SmartRoom
+  Firmware: `--size` = macOS container size - minimum - 20G. On a 500 GB Studio that is about
+  100 GB for macOS and about 390 GB for SmartRoom Firmware.
+- The engine's floor is ~38.5 GB (Root's 32 GiB minimum from `installer_data.json`); never go near it.
+
+If a Mac was installed with a smaller Root, it can be grown later without a reinstall or 1TR:
+shrink macOS from macOS (`diskutil apfs resizeContainer disk0s2 100g`), add a Linux partition in
+the freed space (`diskutil addPartition disk0s2 %Linux% %noformat% <bytes>B`), then from SmartRoom
+Firmware `btrfs device add -f /dev/<new partition> /` (done on the home Studio 2026-11-17; the
+two-device root boots normally).
 
 ## 3. Install
 
@@ -127,7 +132,7 @@ cd ~/smartroom
 (cd image && shasum -a 256 -c SHA256)
 Z=$(ls image/smartroom-firmware-*-os-package.zip); S=$(cut -d' ' -f1 image/SHA256)
 args=(--payload "$Z" --sha256 "$S" --installer-data image/installer_data.json --owner ADMIN
-  --firstboot-env image/firstboot.env --source disk0s2 --size 80G
+  --firstboot-env image/firstboot.env --source disk0s2 --size <macOS size - minimum - 20G>
   --restore-image "/tmp/omarchy-dmg/Omarchy Installer.app/Contents/Helpers/omarchy-restore-image")
 sudo smartroom/mac/engine-install "${args[@]}"            # password on the prompt (or stdin)
 ```
