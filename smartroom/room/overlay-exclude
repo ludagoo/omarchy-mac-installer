@@ -1,0 +1,35 @@
+# Files of ludagoo/smartroomcontrollerfirmware overlay/ that the Omarchy base
+# owns, so the room layer never installs them (brief task 3f: none of our old
+# boot changes). One shell glob per line, relative to overlay/.
+# Boot chain: Limine menu and defaults, m1n1 stage 2 config, initramfs hooks,
+# the kernel command line (panic=10, iommu=pt, pm_async=off ...).
+boot/limine.conf
+etc/default/limine
+etc/default/update-m1n1
+etc/initcpio/*
+etc/mkinitcpio.conf
+etc/mkinitcpio.conf.d/*
+etc/limine-entry-tool.d/*
+usr/lib/omarchy/initcpio/*
+usr/lib/systemd/system/smartroomos-initrd-swap.service
+usr/local/lib/smartroomos/initrd-swap-fix
+etc/sysctl.d/10-smartroomos-panic.conf
+etc/modprobe.d/smartroomos-boot-safety.conf
+etc/modules-load.d/smartroomos-boot-safety.conf
+etc/systemd/system.conf.d/smartroomos-watchdog.conf
+# Snapshots, boot counting and EFI variables: Omarchy's (@factory, snapper,
+# limine-snapper-sync, omarchy-mac-efi-vars).
+etc/limine-snapper-sync.conf
+etc/snap-pac.ini
+etc/snapper/config-templates/*
+etc/systemd/system/boot-complete.target.requires/smartroomos-boot-commit.service
+etc/systemd/system/multi-user.target.wants/smartroomos-boot-commit.service
+etc/systemd/system/smartroomos-boot-commit.service
+etc/systemd/system/multi-user.target.wants/smartroomos-snapshot-recover.service
+usr/lib/systemd/system/smartroomos-snapshot-recover.service
+etc/systemd/system/shutdown.target.wants/smartroomos-efi-vars.service
+usr/lib/systemd/system/smartroomos-efi-vars.service
+usr/local/sbin/smartroomos-efi-vars-save
+# Packages: the image's pacman.conf and mirror list are Omarchy's stable template.
+etc/pacman.conf
+etc/pacman.d/*

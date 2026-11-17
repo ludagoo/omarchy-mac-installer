@@ -1,0 +1,47 @@
+#!/bin/bash
+# Build the SmartRoom Firmware image with this repository's image builder:
+#   smartroom/build-image --inputs INPUTS --recovery-app DIR --cache DIR \
+#     --packages PKGDIR --firmware COMMIT --keys AUTHORIZED_KEYS OUT
+# INPUTS is a stable channel record (image-builder/bin/mac-image-inputs resolve
+# --channel-set --channel stable ...), PKGDIR what smartroom/build-packages
+# wrote, COMMIT a ludagoo/smartroomcontrollerfirmware commit (omarchy-base),
+# AUTHORIZED_KEYS the admin public keys. OUT must not exist yet.
+set -euo pipefail
+here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+inputs="" recovery="" cache="" packages="" firmware="" keys=""
+while (($# > 1)); do
+  case $1 in
+    --inputs) inputs=$2 ;; --recovery-app) recovery=$2 ;; --cache) cache=$2 ;;
+    --packages) packages=$2 ;; --firmware) firmware=$2 ;; --keys) keys=$2 ;;
+    *) break ;;
+  esac
+  shift 2
+done
+out=${1:?Usage: see the header}
+[[ -n $inputs && -n $recovery && -n $cache && -d $packages/repo && -n $firmware && -f $keys ]] ||
+  { echo "missing an option (see the header)" >&2; exit 64; }
+[[ ! -e $out ]] || { echo "$out exists" >&2; exit 1; }
+dir=$(mktemp -d); trap 'rm -rf "$dir"' EXIT
+cp -a "$packages/repo" "$dir/repo"
+cp "$packages/key.asc" "$packages/key.fpr" "$dir/"
+cp "$here/room/packages" "$here/room/apple-drop" "$dir/"
+mkdir -p "$dir/setup/firmware"
+install -m 0755 "$here/room/setup-run" "$dir/setup/run"
+cp "$here/room/overlay-exclude" "$dir/setup/"
+cp "$keys" "$dir/setup/authorized_keys"
+git clone -q https://github.com/ludagoo/smartroomcontrollerfirmware.git "$dir/fw"
+git -C "$dir/fw" checkout -q "$firmware"
+firmware=$(git -C "$dir/fw" rev-parse HEAD)
+git -C "$dir/fw" archive HEAD bin configs overlay studio-install/firstboot.sh \
+  builder/packages-target.aarch64 builder/image/rootfs | tar -x -C "$dir/setup/firmware"
+printf '%s\n' "$firmware" >"$dir/setup/firmware/COMMIT"
+version=$(date -u +%Y.%m.%d)
+{
+  printf 'built_at=%s\niso_version=%s\nbase=omarchy-mac stable (%s)\n' "$(date -u +%FT%TZ)" "$version" "$(sed -n 's/^release_tag=//p' "$inputs")"
+  printf 'installer_fork=%s\nfirmware_git=%s\n' "$(git -C "$here" rev-parse HEAD)" "$firmware"
+  cat "$packages/SOURCE"
+  printf 'bootloader=limine\n'
+} >"$dir/setup/build-info"
+cd "$here/.."
+image-builder/bin/build-mac-image --inputs "$inputs" --recovery-app "$recovery" --cache "$cache" --smartroom "$dir" "$out"
+cp "$dir/setup/build-info" "$out/build-info.txt"

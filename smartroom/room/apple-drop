@@ -1,0 +1,4 @@
+# Names the image leaves out of the runtime's Apple list
+# (omarchy-aarch64-apple.packages).
+omarchy-mac   # Apple desktop defaults and services; depends on the omarchy desktop runtime
+widevine      # browser DRM plugin for the desktop; rooms do not need it

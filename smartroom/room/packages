@@ -1,0 +1,33 @@
+# What the SmartRoom image installs in place of the runtime's package lists:
+# ludagoo/smartroomcontrollerfirmware builder/packages-target.aarch64 minus
+# everything the Omarchy bottom layer already installs (kernel, m1n1, U-Boot,
+# Limine and its hooks, asahi-scripts, asahi-fwextract, cpio, aurora-bless,
+# Mesa/Vulkan, the audio stack, speakerguardd, avd-fw, libva-v4l2_request-avd,
+# wf-recorder, networkmanager, iwd, sudo, curl, jq, btrfs-progs) and plus the
+# helper package omarchy-mac-boot depends on.
+smartroom-omarchy-helpers # Omarchy runtime files omarchy-mac-boot calls (no desktop)
+omarchy-keyring          # Omarchy package key; first boot populates it
+snapper                  # Omarchy's snapper root config (bottom layer, install/config/snapper.sh)
+speakersafetyd           # speakers stay muted without it
+rtkit                    # pipewire realtime
+hyprland                 # kiosk compositor (Omarchy's build)
+aquamarine               # Omarchy's patched aquamarine
+hyprland-guiutils        # hyprland dep
+hyprtoolkit              # hyprland-guiutils dep
+omarchy-chromium-bin     # Omarchy's Chromium
+libva                    # VA-API for Chromium decode
+ffmpeg                   # software encode for previews
+greetd                   # passwordless autologin, no greeter UI
+foot                     # Super+Return escape hatch
+pipewire
+pipewire-pulse
+pipewire-alsa
+wireplumber
+alsa-utils
+bluez
+bluez-utils
+ttf-liberation           # Chromium needs a metric-compatible font
+zram-generator           # swap without a partition
+openssh                  # key-only remote, on from the first boot
+python                   # SmartRoom room program runtime
+inetutils                # hostname (room program install)

@@ -1,0 +1,31 @@
+#!/bin/bash
+# Build the SmartRoom packages from ludagoo/omarchy-mac-pkgs into a signed
+# local pacman repository "smartroom" (on an Arch Linux ARM aarch64 host):
+#   smartroom/build-packages OUT [COMMIT]
+# COMMIT defaults to the tip of omarchy-mac-pkgs smartroom/main. Packages are
+# signed with the local SmartRoom package key (SMARTROOM_PKG_KEY, a gpg
+# fingerprint in the builder's keyring; its secret never leaves the build host).
+# OUT gets repo/ (packages, signatures, smartroom.db), key.asc and key.fpr.
+set -euo pipefail
+out=${1:?Usage: smartroom/build-packages OUT [COMMIT]}
+commit=${2:-}
+key=${SMARTROOM_PKG_KEY:?set SMARTROOM_PKG_KEY to the package signing key fingerprint}
+[[ $(uname -m) == aarch64 ]] || { echo "build on aarch64" >&2; exit 1; }
+src=$(mktemp -d); trap 'rm -rf "$src"' EXIT
+git clone -q https://github.com/ludagoo/omarchy-mac-pkgs.git "$src/pkgs"
+git -C "$src/pkgs" checkout -q "${commit:-origin/smartroom/main}"
+commit=$(git -C "$src/pkgs" rev-parse HEAD)
+date=$(TZ=UTC0 git -C "$src/pkgs" show -s --format=%cd --date=format-local:%Y%m%d HEAD)
+mkdir -p "$out/repo"
+for pkg in smartroom-omarchy-helpers omarchy-mac-boot; do
+  cp -a "$src/pkgs/smartroom/pkgbuilds/$pkg" "$src/$pkg"
+  (cd "$src/$pkg" && SMARTROOM_MAC_PKGS_COMMIT=$commit SMARTROOM_MAC_PKGS_DATE=$date \
+    PKGDEST="$out/repo" makepkg --force --cleanbuild --syncdeps --noconfirm --sign --key "$key")
+done
+rm -f "$out/repo"/smartroom.db* "$out/repo"/smartroom.files*
+repo-add -q "$out/repo/smartroom.db.tar.gz" "$out"/repo/*.pkg.tar.*[!g]
+cp --remove-destination "$out/repo/smartroom.db.tar.gz" "$out/repo/smartroom.db"
+gpg --armor --export "$key" >"$out/key.asc"
+printf '%s\n' "$key" >"$out/key.fpr"
+printf 'omarchy_mac_pkgs_commit=%s\n' "$commit" >"$out/SOURCE"
+ls -l "$out/repo"

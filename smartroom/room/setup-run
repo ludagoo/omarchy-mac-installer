@@ -1,0 +1,67 @@
+#!/bin/bash
+# The SmartRoom room layer. build-mac-image --smartroom runs this as setup/run
+# inside the image root (a chroot), after Omarchy's finalizer and before the
+# initramfs, the Limine activation and the @factory seal. Beside it:
+#   firmware/         ludagoo/smartroomcontrollerfirmware at the commit in
+#                     firmware/COMMIT (branch omarchy-base)
+#   authorized_keys   the admin public keys (never a secret; not committed)
+#   overlay-exclude   overlay files the Omarchy base owns (never installed)
+#   build-info        lines for /usr/share/smartroomos/build-info
+# It installs our overlay minus overlay-exclude, our first boot, the DHCP
+# client id, then runs our studio setup unchanged in image mode (user, keys,
+# sshd, greetd, America/Chicago, units). Packages are already installed.
+set -euo pipefail
+here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+fw=$here/firmware
+[[ -d $fw/overlay && -x $fw/bin/smartroomos-studio-setup && -f $here/authorized_keys ]] ||
+  { echo "setup: firmware/ or authorized_keys missing" >&2; exit 1; }
+
+excluded() {
+  local pattern
+  while read -r pattern; do
+    [[ -n $pattern && $pattern != \#* ]] || continue
+    # shellcheck disable=SC2053
+    [[ $1 == $pattern ]] && return 0
+  done <"$here/overlay-exclude"
+  return 1
+}
+
+# Our overlay without what the Omarchy base owns. The studio setup copies it
+# (its own Mini-only filter still applies).
+overlay=/var/tmp/smartroom-overlay
+rm -rf "$overlay"
+mkdir -p "$overlay"
+while IFS= read -r -d '' rel; do
+  rel=${rel#./}
+  if excluded "$rel"; then
+    echo "setup: left to Omarchy: $rel"
+    continue
+  fi
+  mkdir -p "$overlay/$(dirname -- "$rel")"
+  cp -a "$fw/overlay/$rel" "$overlay/$rel"
+done < <(cd "$fw/overlay" && find . -mindepth 1 \( -type f -o -type l \) -print0)
+
+# The flag our first boot and first-connect read: snapshots are Omarchy's.
+install -d -m 0755 /etc/smartroomos
+: >/etc/smartroomos/omarchy-base
+install -D -m 0755 "$fw/studio-install/firstboot.sh" /usr/local/sbin/smartroomos-firstboot
+install -D -m 0644 "$fw/builder/image/rootfs/etc/NetworkManager/conf.d/smartroomos-dhcp-client-id.conf" \
+  /etc/NetworkManager/conf.d/smartroomos-dhcp-client-id.conf
+
+# The studio setup, unchanged, in image mode. Its pacman.conf merge and mirror
+# list switch go to scratch copies: the image keeps Omarchy's stable template.
+scratch=$(mktemp -d)
+cp /etc/pacman.conf "$scratch/pacman.conf"
+cp /etc/pacman.d/mirrorlist "$scratch/mirrorlist"
+SMARTROOMOS_IMAGE_BUILD=1 \
+  SMARTROOMOS_OVERLAY="$overlay" \
+  SMARTROOMOS_LIB="$overlay/usr/local/lib/smartroomos/install-lib.sh" \
+  SMARTROOMOS_SNAPSHOT_LIB="$overlay/usr/local/lib/smartroomos/snapshot-lib.sh" \
+  SMARTROOMOS_AUTHORIZED_KEYS="$here/authorized_keys" \
+  SMARTROOMOS_PACMAN_CONF="$scratch/pacman.conf" \
+  SMARTROOMOS_PACMAN_MIRRORLIST="$scratch/mirrorlist" \
+  "$fw/bin/smartroomos-studio-setup"
+rm -rf "$scratch" "$overlay"
+
+install -D -m 0644 "$here/build-info" /usr/share/smartroomos/build-info
+echo "setup: SmartRoom room layer installed"
