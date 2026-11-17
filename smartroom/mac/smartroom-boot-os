@@ -1,0 +1,135 @@
+#!/bin/bash
+# smartroom-boot-os (macOS side): choose what this Apple Silicon room Mac
+# starts up from, from macOS. The Linux side is the package smartroom-boot-os
+# (omarchy-mac-pkgs), same verbs.
+#
+#   sudo smartroom-boot-os firmware [--once] [--reboot] [--owner USER | --credential-file FILE]
+#   sudo smartroom-boot-os macos    [--once] [--reboot] [--owner USER | --credential-file FILE]
+#   sudo smartroom-boot-os status
+#
+# On Apple Silicon only a volume owner may change the startup disk: macOS's
+# bless needs an owner's name and password (--user/--stdinpass) even as root,
+# and nothing else can (no MDM command, no Jamf action; the boot-volume NVRAM
+# variables are not writable from macOS). So switching needs a credential:
+#   --owner USER            the password is the first line of standard input
+#                           (SSH, or a Jamf script: ... --owner U <<<"$4");
+#   --credential-file FILE  a root-owned 0600 file, line 1 the owner's short
+#                           name, line 2 the password (for a LaunchDaemon);
+# The password goes only to bless's standard input, never to argv or a log.
+# smartroom/docs/install-zoom-room.md weighs these (and the option of
+# keeping SmartRoom Firmware the default, which needs no credential at all).
+#
+# --once sets the next start only (bless --nextonly); otherwise the choice
+# becomes the default. --reboot restarts after a verified change. The
+# firmware volume is the APFS System volume named "SmartRoom Firmware" (or
+# the older "SmartRoomOS"); macOS is the running system.
+# Uses only macOS's own tools (diskutil, plutil, bless, nvram, shutdown):
+# never python3, git, clang or xcrun, which open the Command Line Tools
+# dialog on a room's screen.
+set -eu
+PATH=/usr/bin:/bin:/usr/sbin:/sbin
+export LC_ALL=C
+die() { echo "smartroom-boot-os: $*" >&2; exit 1; }
+usage() { sed -n 's/^#   sudo /  /p' "$0" >&2; exit 64; }
+
+target="" once=0 reboot=0 owner="" credfile=""
+while [ $# -gt 0 ]; do
+  case $1 in
+    firmware|macos|status) [ -z "$target" ] || usage; target=$1 ;;
+    --once) once=1 ;;
+    --reboot) reboot=1 ;;
+    --owner) [ $# -ge 2 ] || usage; owner=$2; shift ;;
+    --credential-file) [ $# -ge 2 ] || usage; credfile=$2; shift ;;
+    *) usage ;;
+  esac
+  shift
+done
+[ -n "$target" ] || usage
+[ "$(uname -s)" = Darwin ] || die "this runs on macOS (on SmartRoom Firmware use the smartroom-boot-os package)"
+[ "$(id -u)" = 0 ] || die "run with sudo"
+
+tmp=$(mktemp -d /tmp/smartroom-boot-os.XXXXXX)
+trap 'rm -rf "$tmp"' EXIT
+x() { plutil -extract "$2" raw -o - "$1" 2>/dev/null; }      # FILE KEYPATH
+has() { plutil -extract "$2" xml1 -o /dev/null "$1" 2>/dev/null; }
+
+# The firmware's System volume: exactly one APFS System volume with our name.
+diskutil apfs list -plist >"$tmp/apfs" || die "diskutil apfs list failed"
+fw_volume="" fw_name="" c=0
+while has "$tmp/apfs" "Containers.$c"; do
+  v=0
+  while has "$tmp/apfs" "Containers.$c.Volumes.$v"; do
+    name=$(x "$tmp/apfs" "Containers.$c.Volumes.$v.Name" || true)
+    role=$(x "$tmp/apfs" "Containers.$c.Volumes.$v.Roles.0" || true)
+    if [ "$role" = System ] && { [ "$name" = "SmartRoom Firmware" ] || [ "$name" = SmartRoomOS ]; }; then
+      [ -z "$fw_volume" ] || die "more than one SmartRoom Firmware volume ($fw_volume, $(x "$tmp/apfs" "Containers.$c.Volumes.$v.DeviceIdentifier"))"
+      fw_volume=$(x "$tmp/apfs" "Containers.$c.Volumes.$v.DeviceIdentifier")
+      fw_name=$name
+    fi
+    v=$((v + 1))
+  done
+  c=$((c + 1))
+done
+group_of() { diskutil info -plist "$1" >"$tmp/info" 2>/dev/null && x "$tmp/info" APFSVolumeGroupID; }
+macos_group=$(group_of /) || die "cannot read the running macOS's volume group"
+fw_group=""
+[ -z "$fw_volume" ] || fw_group=$(group_of "$fw_volume") || die "cannot read $fw_volume's volume group"
+
+# What starts next: bless --getBoot (the default) and alt-boot-volume (next only),
+# whose value ends in the target's volume group.
+default_group() { d=$(bless --getBoot 2>/dev/null) || return 0; group_of "${d#/dev/}" || true; }
+next_group() { nvram alt-boot-volume 2>/dev/null | awk -F: '{ print $NF }' | tr -d '[:space:]' || true; }
+label() {
+  case $(printf '%s' "$1" | tr '[:lower:]' '[:upper:]') in
+    "") echo "none" ;;
+    "$(printf '%s' "$macos_group" | tr '[:lower:]' '[:upper:]')") echo macOS ;;
+    "$(printf '%s' "$fw_group" | tr '[:lower:]' '[:upper:]')") echo "$fw_name" ;;
+    *) echo "other ($1)" ;;
+  esac
+}
+if [ "$target" = status ]; then
+  echo "default: $(label "$(default_group)")"
+  echo "next:    $(label "$(next_group)")"
+  echo "firmware volume: ${fw_volume:-none} ${fw_name:+($fw_name)}"
+  exit 0
+fi
+
+# As the engine blesses the stub (--device its System volume) and Omarchy's
+# Remove blesses macOS (--mount /).
+if [ "$target" = firmware ]; then
+  [ -n "$fw_volume" ] || die "no SmartRoom Firmware volume on this Mac"
+  args="--setBoot --device /dev/$fw_volume" want=$fw_group what=$fw_name
+else
+  args="--mount / --setBoot" want=$macos_group what=macOS
+fi
+
+# The owner credential.
+if [ -n "$credfile" ]; then
+  [ -z "$owner" ] || die "--owner or --credential-file, not both"
+  [ -f "$credfile" ] && [ ! -L "$credfile" ] || die "no credential file $credfile"
+  perms=$(stat -f '%u %Lp' "$credfile")
+  [ "$perms" = "0 600" ] || [ "$perms" = "0 400" ] || die "$credfile must be root's and 0600 (it is: $perms)"
+  owner=$(sed -n 1p "$credfile")
+  password=$(sed -n 2p "$credfile")
+else
+  [ -n "$owner" ] || die "changing the startup disk needs an owner: --owner USER (password on stdin) or --credential-file FILE"
+  IFS= read -r password || [ -n "${password-}" ] || die "no password on standard input"
+fi
+case $owner in ''|*[!A-Za-z0-9._-]*) die "the owner is not a macOS short user name" ;; esac
+[ -n "$password" ] || die "empty password"
+
+[ "$once" = 0 ] || args="$args --nextonly"
+# shellcheck disable=SC2086
+printf '%s\n' "$password" | bless $args --user "$owner" --stdinpass >"$tmp/bless.out" 2>&1 ||
+  die "bless refused ($(tail -n 1 "$tmp/bless.out")). Is $owner a volume owner (secure token) and the password right?"
+password=""
+
+up() { printf '%s' "$1" | tr '[:lower:]' '[:upper:]'; }
+if [ "$once" = 1 ]; then
+  got=$(next_group) where="next start"
+else
+  got=$(default_group) where=default
+fi
+[ "$(up "$got")" = "$(up "$want")" ] || die "asked for $what as the $where, but the Mac reports $(label "$got")"
+echo "$where: $what"
+[ "$reboot" = 0 ] || shutdown -r now

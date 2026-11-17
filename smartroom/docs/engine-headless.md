@@ -2,11 +2,13 @@
 
 `smartroom/mac/engine-install` installs a locally built OS image (the image builder's zip and `installer_data.json`) on an Apple Silicon Mac from macOS, over SSH, with no GUI, no Swift app and no signed catalog. It runs the installer's pinned Python Engine the way the app does (`Sources/OmarchyAppleInstaller/PinnedAsahiEngineExecutor.swift`): inspect, plan, install, with the same environment, input files, file modes and digests. Then it writes the new ESP's `omarchy/install.conf` the way the app does (`InstallConf.swift`, `InstallConfESP.swift`, `LiveInstallerEnvironment.swift` `recordInstallConf`). It ends where the app ends: the engine journal's `completion` is `awaiting_recovery`, and a person must finish step 2 in the Mac's own Recovery (1TR).
 
+For a SmartRoom Firmware image it also puts the room's `firstboot.env` on the new ESP (`asahi/extras/firstboot.env`), and it ends by checking on its own that the new stub is the Mac's **default** startup volume (the engine blesses it with `--setBoot` and checks, as asahi does; step 2 in 1TR then finishes in one pass), re-blessing it with the owner's password if not.
+
 It reimplements nothing the engine does. The engine still inspects the Mac, computes the inventory and the plan, admits the plan, checks the decoder's signature, validates the payload, partitions, writes, stages Recovery and blesses. The driver only prepares the inputs the app would, picks a candidate (the app's UI step), and checks early a few preconditions the engine would otherwise only hit after it has started.
 
 `Sources/OmarchyCanaryPhysicalTool/main.swift` is the precedent: a root command-line driver of the same executor. It also uses its own trust fingerprint, sequence and identity digest in place of a catalog, and the same binding digest formula.
 
-This is a reviewed draft. Nothing here has run on a Mac yet; see [What is unverified](#what-is-unverified).
+Nothing here has run on a Mac yet; see [What is unverified](#what-is-unverified). `smartroom/test/engine-install-test.sh` runs the whole driver on Linux against simulated macOS tools and a fake engine built on the Engine's real journal, planner, admission and stage-1 modules (see [Tests](#tests)).
 
 ## Which engine
 
@@ -96,9 +98,9 @@ cmd='sudo -S -p "" "$HOME/omarchy-headless/smartroom/mac/engine-install" \
 { printf '%s\n' "$PW"; printf '%s\n' "$PW"; } | ssh MAC "$cmd --yes"      # install
 ```
 
-`--encrypt 0` (the default) and `--lane stable` (the default) go into `install.conf`. `--full-readback` sets `OMARCHY_FULL_READBACK=1`, which makes the engine read back `root.img` too. The output streams the engine's own output and every journal record (`journal N: event stub_and_esp_started` and so on). Everything is also written to `/var/root/omarchy-engine-install/run-<time>/engine-install.log`. The run ignores SIGHUP and SIGPIPE: if SSH drops, reconnect and `sudo tail -f` that log. Expect tens of minutes; most of it is writing `root.img`.
+Add `--firstboot-env FILE` (the room's `firstboot.env`: `SMARTROOMOS_SERVER_URL` and `SMARTROOMOS_AGENT_INSTALL_SHA256` are required and checked; template in smartroomcontrollerfirmware `builder/image/firstboot.env.template`). A SmartRoom Firmware image refuses to install without it unless you pass `--no-firstboot-env`, in which case first boot waits until the file is put on the ESP over SSH. `--encrypt 0` (the default) and `--lane stable` (the default) go into `install.conf`. `--full-readback` sets `OMARCHY_FULL_READBACK=1`, which makes the engine read back `root.img` too. The output streams the engine's own output and every journal record (`journal N: event stub_and_esp_started` and so on). Everything is also written to `/var/root/omarchy-engine-install/run-<time>/engine-install.log`. The run ignores SIGHUP and SIGPIPE: if SSH drops, reconnect and `sudo tail -f` that log. Expect tens of minutes; most of it is writing `root.img`.
 
-When it ends, the Mac's startup disk is the new stub (the engine blesses with `--setBoot`, not `--nextonly`). **Do not reboot it from SSH.** A plain start now boots the new OS's Recovery, which has no SSH. A person at the Mac (display or VoiceOver) does step 2, which the driver prints: shut down, hold the power button (on the back of a Studio or mini) until "Loading startup options", choose the new OS, Continue. The native Recovery app ("Finish setup") asks for the owner's password, then Install, then Restart. To go back to macOS instead, choose the macOS disk in startup options and Option-click "Always Use".
+When it ends, the Mac's startup disk is the new stub (the engine blesses with `--setBoot`, not `--nextonly`; the driver checks `bless --getBoot` against the stub's volume group and re-blesses with `--setBoot --device /dev/<stub System> --user OWNER --stdinpass` if it is not). **Do not reboot it from SSH.** A plain start now boots the new OS's Recovery, which has no SSH. A person at the Mac (display or VoiceOver) does step 2, which the driver prints: shut down, hold the power button (on the back of a Studio or mini) until "Loading startup options", choose the new OS, Continue. The native Recovery app ("Finish setup") asks for the owner's password, then Install, then Restart. To go back to macOS instead, choose the macOS disk in startup options and Option-click "Always Use".
 
 ## What it does, step by step
 
@@ -167,11 +169,11 @@ The engine checks only their format and their binding (`omarchy_execution._valid
 
 ## Run directory
 
-`/var/root/omarchy-engine-install` (`--state`), 0700:
+`/var/root/omarchy-engine-install` (`--state`), 0700 (run directories are `run-<time>-<pid>`):
 
 - `engine/<archive>` (0400)
 - `run-<time>/`:
-  - `engine-install.log`, `params` (owner, encrypt, lane, readback, payload name; no secret)
+  - `engine-install.log`, `params` (owner, encrypt, lane, readback, payload name, no_firstboot_env; no secret), `firstboot.env` (0600; for `--retry`)
   - `inspect.jsonl`, `plan.jsonl`, `*-installer.log`
   - `plan-input/`
   - `package/`, including `restore-image.requirement` and `catalog-local.json`
@@ -185,9 +187,18 @@ A dry run deletes its payload clone. After an install, the clone stays for `--re
 - **Recovery authorization failed** (journal ends with `recovery_handoff_started`, usually a wrong password): run `engine-install --retry RUN_DIR --yes` with the password on stdin. This is the app's `retry-recovery-authorization`: the engine re-reads the installed checkpoint, then blesses again. `install.conf` is written after it.
 - **Anything else after an event:** do not start a fresh install. The engine refuses to replay a started stage (`AmbiguousMutationState`). Read the log and journal. Getting back means removing the new partitions by hand: the APFS stub container, then the ESP, boot and root partitions, all of which `<journal>.partitions.receipt` names. The app's Remove Omarchy reads install journals only from its own helper directory (`/var/db/org.omarchy.installer`), so it never sees this driver's journal or receipt. Whether it recognizes a completed headless install was not checked.
 
+## Tests
+
+`bash smartroom/test/engine-install-test.sh` (Linux, no root, no network): the driver unchanged except its `PATH`, the Preboot path and the absolute `diskutil` in its Python helper, against:
+
+- fake `diskutil`, `plutil`, `bless`, `scutil`, `sysadminctl`, `codesign`, `shasum`, `stat`, `uname` over one simulated disk (ISC, macOS, free space, Recovery), emitting real-looking plists;
+- a fake engine archive (pinned by a test `source-lock.json`) whose `main.py` runs the Engine's own `omarchy_contract.Journal`, `omarchy_planner.emit_plan`, `omarchy_execution.admit_execution` and `omarchy_stage1.run_stage1`/`retry_recovery_authorization` from `Engine/overlay/src`, with an adapter that makes the stub, ESP, Boot and Root on the simulated disk and blesses the stub with the owner's password.
+
+It covers: the refusals (no or bad `firstboot.env`, no console user, a non-owner, no secure token), a dry run (the real planner accepts the request and identity; nothing changes), a wrong password (stops at the Recovery handoff with a `--retry` hint; a fresh install is refused meanwhile; `--retry` completes), `install.conf` and `firstboot.env` on the new ESP, the stub as default startup disk, the 1TR steps, no password anywhere in the state directory, a re-bless when the engine's bless did not take, and a resize install (`--source disk0s2 --size 80G`). A mutation check showed that the engine's admission catches a malformed request; the binding digest itself is only checked for its format and for matching the environment (both written by the driver), so its formula is checked against the app's (`CandidateBoundPlanIdentity`) by review only.
+
 ## What is unverified
 
-Nothing below has run on macOS. The Python helper and the digest chain were tested on Linux against the real engine modules. The bash flow was run end to end under Bash 5.3, with fake macOS tools and a fake `main.py` built on the real journal, planner, admission and stage-1 code. That covered the exact environment set and cwd, file modes, stdin, `--yes`, wrong password then `--retry`, the unfinished-journal guard, and the ESP locator. It proves none of the following:
+Nothing below has run on macOS. The tests above prove none of the following:
 
 1. Bash 3.2 (`/bin/bash` on macOS). This was a manual review for Bash 4 constructs only.
 2. macOS tool behaviour:
@@ -212,4 +223,6 @@ Nothing below has run on macOS. The Python helper and the digest chain were test
     - re-checking the host identity before execution
     - the optional Recovery-account handoff and Recovery-app refresh at shutdown (`RecoveryAccountHandoff.swift`)
     - install timing history
-11. Step 2 itself (native Recovery on the stub, the boot policy, the first boot of the image with `encrypt=0`). The driver stops at `awaiting_recovery`.
+11. Step 2 itself (native Recovery on the stub, the boot policy, the first boot of the image with `encrypt=0`). The driver stops at `awaiting_recovery`. The VoiceOver keys it prints (Cmd+F5 in startup options; Control+Option+arrows/Space) are Apple's documented VoiceOver keys; 1TR with VoiceOver and no display worked on the home Studio on 2026-11-17; that the native Recovery app ("Finish setup") of a fresh Engine install is usable with VoiceOver is untested.
+12. `bless --getBoot` naming a volume of the stub's volume group right after the engine's bless, before step 2 (the re-bless check compares volume groups); `diskutil info -plist` giving that volume's `APFSVolumeGroupID`.
+13. A FAT ESP accepting `asahi/extras/firstboot.env` written from macOS with no AppleDouble file left behind (the driver deletes `._*` it would have made).
