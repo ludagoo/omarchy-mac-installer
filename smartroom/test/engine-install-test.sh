@@ -305,7 +305,9 @@ json.dump(lock, open(sys.argv[2], "w"))
 PY
 cp "$src/Packaging/identity.conf" "$t/repo/Packaging/"
 # the driver, pointed at the mocks (PATH, Preboot, the absolute diskutil in its Python)
-sed -e "s|^PATH=/usr/bin:/bin:/usr/sbin:/sbin$|PATH=$mock:/usr/bin:/bin:/usr/sbin:/sbin|" \
+# TEST_BASH=/path/to/bash-3.2 runs the driver under macOS's /bin/bash version
+sed -e "1s|^#!/bin/bash$|#!${TEST_BASH:-/bin/bash}|" \
+  -e "s|^PATH=/usr/bin:/bin:/usr/sbin:/sbin$|PATH=$mock:/usr/bin:/bin:/usr/sbin:/sbin|" \
   -e "s|/System/Volumes/Preboot/|$t/preboot/|" -e "s|\"/usr/sbin/diskutil\"|\"$mock/diskutil\"|g" \
   -e 's#^(( EUID == 0 )) || die "run as root (sudo)"$#:#' \
   -e "s|env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin LC_ALL=C|env -i PATH=$mock:/usr/bin:/bin:/usr/sbin:/sbin LC_ALL=C|" \

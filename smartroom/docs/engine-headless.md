@@ -200,7 +200,7 @@ It covers: the refusals (no or bad `firstboot.env`, no console user, a non-owner
 
 Nothing below has run on macOS. The tests above prove none of the following:
 
-1. Bash 3.2 (`/bin/bash` on macOS). This was a manual review for Bash 4 constructs only.
+1. Bash 3.2 as macOS ships it (`/bin/bash`). The test passes under GNU bash 3.2.57 built on Linux (`TEST_BASH=<bash-3.2> bash smartroom/test/engine-install-test.sh`), not Apple's build.
 2. macOS tool behaviour:
    - `plutil -extract … raw` on JSON input (macOS 12+)
    - `codesign -dv --verbose=4` field names, including `Signature=adhoc`

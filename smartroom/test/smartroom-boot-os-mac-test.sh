@@ -84,7 +84,9 @@ printf '#!/bin/bash\necho 0\n' >"$mock/id"
 printf '#!/bin/bash\n[[ $1 == -f ]] && exec /usr/bin/stat -c "%%u %%a" "$3"; exec /usr/bin/stat "$@"\n' >"$mock/stat"
 printf '#!/bin/bash\necho "$*" >>%q\n' "$t/shutdown.log" >"$mock/shutdown"
 chmod +x "$mock"/*
-sed -e "s|^PATH=/usr/bin:/bin:/usr/sbin:/sbin$|PATH=$mock:/usr/bin:/bin:/usr/sbin:/sbin|" "$here/../mac/smartroom-boot-os" >"$t/sbo"
+# TEST_BASH=/path/to/bash-3.2 runs it under macOS's /bin/bash version
+sed -e "1s|^#!/bin/bash$|#!${TEST_BASH:-/bin/bash}|" \
+  -e "s|^PATH=/usr/bin:/bin:/usr/sbin:/sbin$|PATH=$mock:/usr/bin:/bin:/usr/sbin:/sbin|" "$here/../mac/smartroom-boot-os" >"$t/sbo"
 chmod +x "$t/sbo"; grep -q "^PATH=$mock" "$t/sbo" || fail "could not point the script at the mocks"
 get() { python3 -c 'import json,sys; s=json.load(open(sys.argv[1])); print(s["default"], s["next"])' "$state"; }
 

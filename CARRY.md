@@ -21,8 +21,8 @@ Omarchy's Chromium, the room package list and the room's own files.
 | # | What | Why | Upstream PR candidate? | Drop when |
 | --- | --- | --- | --- | --- |
 | 1 | `CARRY.md`, `smartroom/sync-upstream.sh` | This file and the sync script | No (ours) | Never |
-| 2 | `image-builder`: `build-mac-image --smartroom DIR` (one profile switch; every hunk is `profile == smartroom`), plus `mac-image-check payload --os-name` and the `smartroom` profile, `finalize-root --headless`, `package_record.py --local-repository/--not-installed` | Builds the headless image from the same stable channel record as Omarchy's: no `omarchy`/`omarchy-settings`/desktop lists; our `omarchy-mac-boot` and `smartroom-omarchy-helpers` from a signed local repo; `omarchy-apply-system` replaced by the two runtime steps the boot chain needs (`install/config/snapper.sh`, the hardware deferral with `platform-setup.sh`, both the runtime's own code); no owner provisioning, Plymouth splash or display manager; the room layer runs as `setup/run` before the initramfs; the picker/stub/Limine name is "SmartRoom Firmware"; the ESP carries `omarchy/install.conf` `encrypt=0`. The Omarchy release inspection (which holds the desktop runtime) is skipped for this profile; `smartroom/desk-check` and omarchy-mac-boot's own `omarchy-apple-silicon-boot-check` check the boot chain instead. The stock build is unchanged (the builder's own `image-builder/test/all` passes). | Partly: "build-mac-image: a headless profile without the desktop runtime" could be offered to omacom as a draft once rooms prove it | omacom ships a headless profile |
-| 3 | `smartroom/`: `room/` (package list, Apple-list drops, overlay exclusions, `setup-run`), `build-packages`, `build-image`, `desk-check`, `mac/install-onto-existing-stub`, `mac/engine-install` (+ `docs/`) | Our layer and tooling only; nothing upstream reads it | No (ours) | Never |
+| 2 | `image-builder`: `build-mac-image --smartroom DIR` (one profile switch; every hunk is `profile == smartroom`), plus `mac-image-check payload --os-name` and the `smartroom` profile, `finalize-root --headless`, `package_record.py --local-repository/--not-installed` | Builds the headless image from the same stable channel record as Omarchy's: no `omarchy`/`omarchy-settings`/desktop lists; our `omarchy-mac-boot` and `smartroom-omarchy-helpers` from a signed local repo; `omarchy-apply-system` replaced by the two runtime steps the boot chain needs (`install/config/snapper.sh`, the hardware deferral with `platform-setup.sh`, both the runtime's own code); no owner provisioning, Plymouth splash or display manager; the room layer runs as `setup/run` before the initramfs; the picker/stub/Limine name is "SmartRoom Firmware"; the ESP carries `omarchy/install.conf` `encrypt=0`. The setup tree is handed to root (`chown -R 0:0`) as it enters the image root: it comes from the host's build user (uid 1000, which is the room's own user in the image). The Omarchy release inspection (which holds the desktop runtime) is skipped for this profile; `smartroom/desk-check` and omarchy-mac-boot's own `omarchy-apple-silicon-boot-check` check the boot chain instead. The stock build is unchanged (the builder's own `image-builder/test/all` passes). | Partly: "build-mac-image: a headless profile without the desktop runtime" could be offered to omacom as a draft once rooms prove it | omacom ships a headless profile |
+| 3 | `smartroom/`: `room/` (package list, Apple-list drops, overlay exclusions, `owner-allow`, the AQC113 wired profile, `setup-run`), `build-packages`, `build-image`, `desk-check`, `mac/engine-install`, `mac/remove-firmware`, `mac/smartroom-boot-os`, `mac/install-onto-existing-stub`, `test/` (+ `docs/`, among them `install-zoom-room.md`) | Our layer and tooling only; nothing upstream reads it | No (ours) | Never |
 
 ### Not carried (brief task 3f)
 
@@ -66,7 +66,13 @@ SMARTROOM_PKG_KEY=<fpr> smartroom/build-packages PKGS                           
 smartroom/build-image --inputs INPUTS --recovery-app REC --cache CACHE --packages PKGS \
   --firmware omarchy-base [--firmware-repo BUNDLE] --keys AUTHORIZED_KEYS OUT              # SmartRoom
 sudo smartroom/desk-check OUT/*.zip WORKDIR
+bash smartroom/test/all                                                                   # our tools' tests
 ```
+
+`desk-check` fails on any file under `/etc`, `/usr` or `/opt` of the image
+owned by a non-root user or a user group (gid >= 1000) that
+`smartroom/room/owner-allow` does not list (it lists nothing), and runs
+`visudo -c` in the image.
 
 ## Branches
 

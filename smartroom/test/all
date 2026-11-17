@@ -1,0 +1,11 @@
+#!/bin/bash
+# Every SmartRoom tool test (Linux, no root, no Mac): smartroom/test/*-test.sh.
+set -uo pipefail
+here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+fail=0
+for t in "$here"/*-test.sh; do
+  echo "== ${t##*/}"
+  bash "$t" || { echo "FAIL ${t##*/}"; fail=1; }
+done
+(( fail == 0 )) && echo "all SmartRoom tool tests passed"
+exit $fail

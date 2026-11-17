@@ -1,5 +1,11 @@
 # Installing onto the home Studio's existing stub (no new stub, no 1TR)
 
+> Superseded for fresh installs (2026-11-17, later): a Mac goes back to plain
+> macOS with `smartroom/mac/remove-firmware` and gets SmartRoom Firmware with
+> `smartroom/mac/engine-install` (Omarchy's own engine, so Omarchy's own
+> stage 1 for the board), as in [install-zoom-room.md](install-zoom-room.md).
+> This page stays as the record of the stub-reuse path.
+
 For the home test Studio (Mac14,13, macOS 14.5, 192.168.1.147). It already has
 an Asahi-style stub from the old SmartRoomOS install whose 1TR step is done:
 
