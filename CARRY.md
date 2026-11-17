@@ -37,11 +37,22 @@ a listed carry patch with its evidence.
 ### Files of ours that override one of Omarchy's
 
 None at the file level: the room layer installs only paths Omarchy does not
-ship. Two of Omarchy's *settings* are set by the image instead of the
-installer app: `TARGET_OS_NAME` in `/etc/default/limine` (kept by our
-omarchy-mac-boot patch) and `omarchy/install.conf` on the ESP (Omarchy's own
-encryption switch, `encrypt=0`). The installed `/etc/localtime` is
-America/Chicago (the room setup), not the builder's UTC.
+ship. Checked on the built image (`pacman -Qo` on every room file): no file of
+an Omarchy package (omarchy-mac-boot, the Aurora boot set, smartroom-omarchy-helpers)
+is overwritten. Our room files that replace someone else's:
+
+- package defaults: `/etc/greetd/config.toml` (greetd: autologin into the
+  kiosk session), `/etc/hosts` (filesystem: the same two localhost lines),
+  `/etc/locale.gen` (glibc: en_US.UTF-8, as the builder also sets);
+- files Omarchy's builder writes (`builder/finalize-root`): `/etc/locale.conf`
+  (identical), `/etc/vconsole.conf` (`KEYMAP=us`, the builder's has the same
+  keymap plus XKB lines), `/etc/localtime` (America/Chicago instead of UTC).
+
+Two of Omarchy's *settings* are set by the image instead of the installer
+app: `TARGET_OS_NAME` in `/etc/default/limine` (kept by our omarchy-mac-boot
+patch) and `omarchy/install.conf` on the ESP (Omarchy's own encryption
+switch, `encrypt=0`). The room setup also masks `NetworkManager-wait-online`,
+as stock Omarchy's desktop setup does.
 
 ## Building
 
