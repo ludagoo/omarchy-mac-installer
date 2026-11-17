@@ -51,8 +51,40 @@ cmdline=$(sed -n 's/^ *cmdline: //p' "$m/boot/efi/limine.conf" | head -n 1)
 echo "Limine cmdline: $cmdline"
 echo "Limine entries: $(grep -E '^/' "$m/boot/efi/limine.conf" | paste -sd' ' -)"
 echo "Limine timeout: $(sed -n 's/^timeout: //p' "$m/boot/efi/limine.conf")"
+# Every file under /etc, /usr and /opt is root's, unless smartroom/room/owner-allow
+# says otherwise: a file the build user left behind belongs to uid 1000, the
+# room's own user (sudo then ignores a sudoers file, and the kiosk user could
+# rewrite root's units). System groups of packages (polkitd, tty, dbus) pass.
+allow=$(dirname -- "${BASH_SOURCE[0]}")/room/owner-allow
+owners=$(cd "$m" && find etc usr opt -xdev \( ! -uid 0 -o -gid +999 \) -printf '%p %U:%G\n' 2>/dev/null |
+  while read -r path owner; do
+    awk -v p="$path" -v o="$owner" '$1 == p && $2 == o { found = 1 } END { exit !found }' "$allow" 2>/dev/null ||
+      echo "/$path $owner"
+  done)
+if [[ -z $owners ]]; then
+  pass "every file under /etc, /usr, /opt is root's (or in room/owner-allow)"
+else
+  failed "files under /etc, /usr, /opt owned by a non-root user or group ($(wc -l <<<"$owners")):"
+  sed 's/^/  /' <<<"$owners" | head -n 40
+fi
+check "sudoers and sudoers.d parse, with the owner and mode sudo requires" chroot "$m" visudo -c -q
 if [[ -e $m/etc/omarchy-mac-boot/headless ]]; then
   echo "== SmartRoom image"
+  nm=$m/etc/NetworkManager/system-connections/smartroom-wired.nmconnection
+  check "wired profile present (AQC113 needs accept-all-mac-addresses)" test -f "$nm"
+  check "wired profile is root's, mode 0600 (NetworkManager ignores it otherwise)" test "$(stat -c '%u:%g %a' "$nm" 2>/dev/null)" = "0:0 600"
+  check "wired profile: [ethernet] accept-all-mac-addresses=1" \
+    test "$(awk '/^\[/ { s = $0 } s == "[ethernet]" && $0 == "accept-all-mac-addresses=1" { print "yes" }' "$nm" 2>/dev/null)" = yes
+  check "sudoers.d/smartroomcontroller root's, 0440" test "$(stat -c '%u:%g %a' "$m/etc/sudoers.d/smartroomcontroller" 2>/dev/null)" = "0:0 440"
+  check "Limine name: TARGET_OS_NAME=\"SmartRoom Firmware\"" grep -qx 'TARGET_OS_NAME="SmartRoom Firmware"' "$m/etc/default/limine"
+  meta=$(dirname -- "$zip")/installer_data.json
+  if [[ -f $meta ]]; then
+    check "picker and stub name: installer_data.json says SmartRoom Firmware" \
+      test "$(jq -r '[.os_list[] | .name, .default_os_name] | unique | join(",")' "$meta")" = "SmartRoom Firmware"
+  else
+    failed "no installer_data.json beside $zip (the picker and stub name)"
+  fi
+  check "smartroom-boot-os and aurora-bless installed" test -x "$m/usr/bin/smartroom-boot-os" -a -x "$m/usr/bin/aurora-bless"
   check "Limine entry says SmartRoom Firmware" grep -qx '/+SmartRoom Firmware' "$m/boot/efi/limine.conf"
   check "ESP install.conf: encrypt=0" grep -qx 'encrypt=0' "$m/boot/efi/omarchy/install.conf"
   check "sshd enabled" test -L "$wants/sshd.service"

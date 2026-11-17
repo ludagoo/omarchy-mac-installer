@@ -38,7 +38,7 @@ while IFS= read -r -d '' rel; do
     continue
   fi
   mkdir -p "$overlay/$(dirname -- "$rel")"
-  cp -a "$fw/overlay/$rel" "$overlay/$rel"
+  cp -a --no-preserve=ownership "$fw/overlay/$rel" "$overlay/$rel"
 done < <(cd "$fw/overlay" && find . -mindepth 1 \( -type f -o -type l \) -print0)
 
 # The flag our first boot and first-connect read: snapshots are Omarchy's.

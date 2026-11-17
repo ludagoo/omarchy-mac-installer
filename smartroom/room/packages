@@ -6,6 +6,7 @@
 # wf-recorder, networkmanager, iwd, sudo, curl, jq, btrfs-progs) and plus the
 # helper package omarchy-mac-boot depends on.
 smartroom-omarchy-helpers # Omarchy runtime files omarchy-mac-boot calls (no desktop)
+smartroom-boot-os        # switch between SmartRoom Firmware and macOS (aurora-bless)
 omarchy-keyring          # Omarchy package key; first boot populates it
 snapper                  # Omarchy's snapper root config (bottom layer, install/config/snapper.sh)
 speakersafetyd           # speakers stay muted without it

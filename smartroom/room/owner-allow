@@ -1,0 +1,6 @@
+# Files under /etc, /usr and /opt of an image that may belong to someone other
+# than root (smartroom/desk-check). One per line: PATH UID:GID WHY.
+# The desk-check fails on any file there with a non-root owner, or with a
+# group of 1000 or above (a user's group), that is not listed here. Package
+# files with a system group (polkitd, tty, dbus) pass without a line.
+# Nothing is listed: every room file is root's.

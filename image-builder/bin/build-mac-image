@@ -1326,7 +1326,10 @@ apply_smartroom() {
   : >"$target/etc/omarchy-mac-boot/headless"
   printf 'TARGET_OS_NAME="%s"\n' "$OS_NAME" >"$target/etc/default/limine"
   rm -rf "$target/var/tmp/smartroom-setup"
-  cp -a "$smartroom_dir/setup" "$target/var/tmp/smartroom-setup"
+  # The setup tree belongs to the host's build user (uid 1000, which is the
+  # room's own user in the image): what it installs must be root's.
+  cp -a --no-preserve=ownership "$smartroom_dir/setup" "$target/var/tmp/smartroom-setup"
+  chown -R 0:0 "$target/var/tmp/smartroom-setup"
   isolated_chroot "$target" env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/bin HOME=/root TERM=dumb LANG=C.UTF-8 \
     /var/tmp/smartroom-setup/run >>"$logs/smartroom-setup.log" 2>&1 || fail "the SmartRoom setup stopped (logs/smartroom-setup.log)"
   rm -rf "$target/var/tmp/smartroom-setup"
