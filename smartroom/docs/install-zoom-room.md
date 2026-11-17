@@ -285,8 +285,15 @@ Tested only on Linux against simulated macOS tools (each tool's
   on 2026-11-17 with the earlier stub), and the native Recovery app with
   VoiceOver.
 - `remove-firmware` on real `diskutil` (`apfs deleteContainer` also removing
-  the physical store, `eraseVolume free none`, `apfs resizeContainer ... 0`,
-  BSD numbers after a deletion) and `bless --mount / --setBoot` there.
+  the physical store, `eraseVolume free none`, `apfs resizeContainer ... 0`
+  and its `limits -plist` `MaximumSize`, BSD numbers after a deletion,
+  `mount readOnly nobrowse` of the FAT ESP) and `bless --mount / --setBoot`
+  there; the plist key names it reads (`Internal`, `WholeDisk`, `Content`
+  values such as `Linux Filesystem`, `PartitionMapPartitionOffset`, `DiskUUID`,
+  `APFSVolumeGroupID`, `apfs list` containers and volumes); `plutil -extract
+  KEY raw` printing plain values; `nvram -p` printing `boot-volume` and
+  `alt-boot-volume` tab-separated as `GUID:PARTUUID:VGUUID`; and its speed (a
+  few hundred `plutil` calls per disk read).
 - Both `smartroom-boot-os` tools on a Mac: `aurora-bless` on j475c NVRAM from
   linux-aurora (the `/dev/mtd/by-name/nvram` device), `bless --nextonly` with
   an owner, `nvram alt-boot-volume` read-back, and the switching behaviour

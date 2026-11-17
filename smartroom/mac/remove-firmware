@@ -1,0 +1,527 @@
+#!/bin/bash
+# Return an Apple Silicon Mac to plain macOS: remove SmartRoom Firmware (or an
+# Omarchy install, or the older single-partition SmartRoomOS layout) and give
+# its space back to macOS. macOS only, as root (sudo), over SSH is fine.
+#
+#   sudo remove-firmware [--owner USER] [--yes]
+#
+# Without --yes it only reads the disk and prints what it found and the plan.
+# With --yes it:
+#   1. sets the running macOS as the startup disk first, when it is not
+#      already (bless --mount / --setBoot [--nextonly] --user USER --stdinpass;
+#      Apple Silicon needs a machine owner's password for that: --owner, and
+#      the password as the first line of standard input, never an argument);
+#   2. deletes the stub's APFS container (diskutil apfs deleteContainer, which
+#      also deletes its partition), then the ESP and each Linux partition
+#      (diskutil eraseVolume free none), locating each by its partition UUID
+#      just before the change;
+#   3. grows the macOS container into the freed space
+#      (diskutil apfs resizeContainer <macOS store> 0) and checks the result.
+#
+# It mirrors the Omarchy installer app's "Remove Omarchy"
+# (Development/Removal.md, Sources/OmarchyAppleInstaller/OmarchyRemoval*.swift):
+# the same layout recognition (Apple ISC, the booted macOS, one stub + ESP + up
+# to two Linux partitions, Apple Recovery last), the same evidence on the ESP
+# (m1n1/boot.bin, asahi/stub_info.json naming the stub's volume group), the
+# same startup-disk step and the same diskutil commands in the same order, no
+# force fallback. Relaxed for SmartRoom: any stub name ("SmartRoomOS",
+# "SmartRoom Firmware", "Omarchy", ...), an ESP of up to 2.5 GiB (the old
+# SmartRoom ESP is 2 GiB) and a single Linux partition (the old layout).
+# It refuses anything else, and never touches the Apple ISC, the macOS
+# container or Apple Recovery.
+#
+# Tools: only macOS's own diskutil, plutil, bless and nvram plus basic
+# /bin and /usr/bin tools, and /bin/bash 3.2. Never python3, git, clang,
+# xcrun, strings, jq or the like: on a Mac without the Command Line Tools
+# they open the "install developer tools" dialog on the room's screen.
+set -euo pipefail
+export LC_ALL=C LANG=C
+PATH=/usr/bin:/bin:/usr/sbin:/sbin
+umask 077
+die() { echo "remove-firmware: $*" >&2; exit 1; }
+usage() { sed -n 's/^#   sudo /  /p' "$0" >&2; exit 64; }
+
+owner="" yes=0
+while [ $# -gt 0 ]; do
+  case $1 in
+    --owner) [ $# -ge 2 ] || usage; owner=$2; shift ;;
+    --yes) yes=1 ;;
+    -h|--help) usage ;;
+    *) echo "remove-firmware: unknown argument $1" >&2; usage ;;
+  esac
+  shift
+done
+[ "$(uname -s)" = Darwin ] && [ "$(uname -m)" = arm64 ] || die "this runs on an Apple Silicon Mac's macOS"
+[ "$(id -u)" = 0 ] || die "run with sudo"
+case $owner in
+  "") ;;
+  *[!A-Za-z0-9._-]*) die "--owner is a macOS short user name" ;;
+esac
+
+tmp=$(mktemp -d /tmp/remove-firmware.XXXXXX)
+mounted=""
+cleanup() {
+  if [ -n "$mounted" ]; then diskutil unmount "$mounted" >/dev/null 2>&1 || true; fi
+  rm -rf "$tmp"
+}
+trap cleanup EXIT
+logdir=/var/root/smartroom-remove-firmware
+mkdir -p "$logdir"
+log=$logdir/run-$(date +%Y%m%d-%H%M%S).log
+say() { echo "== $*"; echo "$(date '+%F %T') $*" >>"$log"; }
+note() { echo "$*"; echo "$(date '+%F %T') $*" >>"$log"; }
+
+GiB=1073741824 MiB=1048576
+upper() { printf '%s' "$1" | tr '[:lower:]' '[:upper:]'; }
+
+# --- plists: diskutil writes a file, plutil reads one key from it ----------
+query() { # FILE diskutil-args...: one diskutil query into FILE
+  local file=$1
+  shift
+  diskutil "$@" >"$file" 2>/dev/null || die "diskutil $* failed"
+}
+has() { plutil -extract "$2" xml1 -o - "$1" >/dev/null 2>&1; }
+get() { plutil -extract "$2" raw -o - "$1" 2>/dev/null; }
+need() { # FILE KEY: a value that must be there
+  local v
+  v=$(get "$1" "$2") && [ -n "$v" ] || die "diskutil gave no $2 (${1##*/})"
+  printf '%s\n' "$v"
+}
+num() { # FILE KEY: a non-negative integer that must be there
+  local v
+  v=$(need "$1" "$2")
+  case $v in ''|*[!0-9]*) die "diskutil gave a non-numeric $2: $v" ;; esac
+  printf '%s\n' "$v"
+}
+
+# --- snapshot: the booted macOS, the disk's partitions, the APFS containers -
+# Sets disk, disk_size, mac_group, mac_ref, n and P_ID/P_UUID/P_TYPE/P_OFF/
+# P_SIZE/P_NAME[0..n-1] sorted by offset, and C_REF/C_UUID/C_STORE[0..nc-1].
+snapshot() {
+  local f=$tmp/s i id store k line count v
+  query "$f.root" info -plist /
+  [ "$(get "$f.root" Internal)" = true ] || die "macOS is not running from the internal disk"
+  has "$f.root" APFSPhysicalStores.0 && ! has "$f.root" APFSPhysicalStores.1 ||
+    die "the running macOS is not on exactly one APFS physical store"
+  store=$(need "$f.root" APFSPhysicalStores.0.APFSPhysicalStore)
+  mac_ref=$(need "$f.root" APFSContainerReference)
+  v=$(need "$f.root" APFSVolumeGroupID); mac_group=$(upper "$v")
+  query "$f.store" info -plist "$store"
+  disk=$(need "$f.store" ParentWholeDisk)
+  v=$(need "$f.store" DiskUUID); mac_store_uuid=$(upper "$v")
+  query "$f.disk" info -plist "$disk"
+  [ "$(get "$f.disk" Internal)" = true ] && [ "$(get "$f.disk" WholeDisk)" = true ] &&
+    [ "$(get "$f.disk" Content)" = GUID_partition_scheme ] || die "$disk is not the internal GPT disk"
+  disk_size=$(num "$f.disk" Size)
+
+  query "$f.list" list -plist "$disk"
+  i=0 k=""
+  while has "$f.list" "AllDisksAndPartitions.$i"; do
+    if [ "$(get "$f.list" "AllDisksAndPartitions.$i.DeviceIdentifier")" = "$disk" ]; then
+      [ -z "$k" ] || die "diskutil lists $disk twice"
+      k=$i
+    fi
+    i=$((i + 1))
+  done
+  [ -n "$k" ] || die "diskutil list does not list $disk"
+  [ "$(get "$f.list" "AllDisksAndPartitions.$k.Content")" = GUID_partition_scheme ] || die "$disk has no GUID partition map"
+  : >"$f.order"
+  i=0
+  while has "$f.list" "AllDisksAndPartitions.$k.Partitions.$i"; do
+    [ $i -lt 32 ] || die "$disk has more than 32 partitions"
+    id=$(need "$f.list" "AllDisksAndPartitions.$k.Partitions.$i.DeviceIdentifier")
+    query "$f.p$i" info -plist "$id"
+    [ "$(need "$f.p$i" DeviceIdentifier)" = "$id" ] && [ "$(need "$f.p$i" ParentWholeDisk)" = "$disk" ] ||
+      die "$id is not a partition of $disk"
+    v=$(num "$f.p$i" PartitionMapPartitionOffset)
+    echo "$v $i" >>"$f.order"
+    i=$((i + 1))
+  done
+  [ $i -gt 0 ] || die "$disk has no partitions"
+  P_ID=() P_UUID=() P_TYPE=() P_OFF=() P_SIZE=() P_NAME=()
+  n=0
+  while read -r line; do
+    k=${line#* }
+    P_ID[n]=$(need "$f.p$k" DeviceIdentifier)
+    v=$(need "$f.p$k" DiskUUID); P_UUID[n]=$(upper "$v")
+    P_TYPE[n]=$(need "$f.p$k" Content)
+    P_OFF[n]=$(num "$f.p$k" PartitionMapPartitionOffset)
+    P_SIZE[n]=$(num "$f.p$k" Size)
+    P_NAME[n]=$(get "$f.p$k" VolumeName || true)
+    [ "${P_SIZE[n]}" -gt 0 ] || die "${P_ID[n]} has no size"
+    n=$((n + 1))
+  done < <(sort -n "$f.order")
+  i=1
+  while [ $i -lt $n ]; do
+    [ $((P_OFF[i - 1] + P_SIZE[i - 1])) -le "${P_OFF[i]}" ] || die "${P_ID[i - 1]} and ${P_ID[i]} overlap"
+    i=$((i + 1))
+  done
+  [ $((P_OFF[n - 1] + P_SIZE[n - 1])) -le "$disk_size" ] || die "${P_ID[n - 1]} ends past the end of $disk"
+
+  query "$f.apfs" apfs list -plist
+  C_REF=() C_UUID=() C_STORE=()
+  nc=0 i=0
+  while has "$f.apfs" "Containers.$i"; do
+    C_REF[nc]=$(need "$f.apfs" "Containers.$i.ContainerReference")
+    v=$(need "$f.apfs" "Containers.$i.APFSContainerUUID"); C_UUID[nc]=$(upper "$v")
+    count=0
+    while has "$f.apfs" "Containers.$i.PhysicalStores.$count"; do count=$((count + 1)); done
+    if [ $count -eq 1 ]; then
+      C_STORE[nc]=$(need "$f.apfs" "Containers.$i.PhysicalStores.0.DeviceIdentifier")
+    else
+      C_STORE[nc]="(several)"
+    fi
+    nc=$((nc + 1)) i=$((i + 1))
+  done
+}
+
+# Index of the partition with UUID $1 in the snapshot, or nothing.
+part_by_uuid() {
+  local i=0
+  while [ $i -lt $n ]; do
+    [ "${P_UUID[i]}" != "$1" ] || { echo $i; return 0; }
+    i=$((i + 1))
+  done
+  return 1
+}
+# The apfs list index of the container on physical store $1 (exactly one), or nothing.
+container_on() {
+  local i=0 found="" multi=0
+  while [ $i -lt $nc ]; do
+    if [ "${C_STORE[i]}" = "$1" ]; then
+      [ -z "$found" ] || multi=1
+      found=$i
+    fi
+    i=$((i + 1))
+  done
+  [ -n "$found" ] && [ $multi -eq 0 ] && echo "$found"
+}
+
+# Classify middle partition $1: stub, esp, linux, othersystem or foreign.
+# For a stub it also sets stub_group, stub_system (BSD id), stub_name.
+classify() {
+  local i=$1 c f=$tmp/s.apfs v roles name vid nsys=0 ndata=0 npre=0 nrec=0 nvol=0 sys_group="" data_group="" sys_id="" sys_name="" size=${P_SIZE[$1]}
+  case $(upper "${P_TYPE[i]}") in
+    EFI) echo esp; return ;;
+    "LINUX FILESYSTEM"|0FC63DAF-8483-4772-8E79-3D69D8477DE4) echo linux; return ;;
+    APPLE_APFS) ;;
+    *) echo foreign; return ;;
+  esac
+  [ "${P_TYPE[i]}" = Apple_APFS ] || { echo foreign; return; }
+  c=$(container_on "${P_ID[i]}") || { echo foreign; return; }
+  # apfs list order is the snapshot's order: Containers.$c
+  v=0
+  while has "$f" "Containers.$c.Volumes.$v"; do
+    roles=$(r=0; while has "$f" "Containers.$c.Volumes.$v.Roles.$r"; do get "$f" "Containers.$c.Volumes.$v.Roles.$r"; r=$((r + 1)); done | sort | paste -sd, -)
+    name=$(get "$f" "Containers.$c.Volumes.$v.Name" || true)
+    vid=$(need "$f" "Containers.$c.Volumes.$v.DeviceIdentifier")
+    case $roles in
+      System) nsys=$((nsys + 1)); sys_id=$vid; sys_name=$name
+        query "$tmp/s.vsys" info -plist "$vid"; sys_group=$(upper "$(get "$tmp/s.vsys" APFSVolumeGroupID || true)") ;;
+      Data) ndata=$((ndata + 1))
+        query "$tmp/s.vdata" info -plist "$vid"; data_group=$(upper "$(get "$tmp/s.vdata" APFSVolumeGroupID || true)") ;;
+      Preboot) npre=$((npre + 1)) ;;
+      Recovery) nrec=$((nrec + 1)) ;;
+    esac
+    nvol=$((nvol + 1)) v=$((v + 1))
+  done
+  [ $nsys -gt 0 ] && [ $ndata -gt 0 ] || { echo foreign; return; }
+  # asahi-installer's STUB_SIZE is 2,499,805,184 bytes; on macOS 26 firmware 5,999,951,872.
+  if { { [ "$size" -ge 2300000000 ] && [ "$size" -le 2700000000 ]; } ||
+       { [ "$size" -ge 5800000000 ] && [ "$size" -le 6200000000 ]; }; } &&
+     [ $nvol -eq 4 ] && [ $nsys -eq 1 ] && [ $ndata -eq 1 ] && [ $npre -eq 1 ] && [ $nrec -eq 1 ] &&
+     [ -n "$sys_group" ] && [ "$sys_group" = "$data_group" ]; then
+    stub_group=$sys_group stub_system=$sys_id stub_name=$sys_name
+    echo stub
+  else
+    echo othersystem
+  fi
+}
+
+describe() { # index: one line about a partition
+  local i=$1
+  printf '  %-9s %-22s %6s GiB at %s  %s  %s\n' "${P_ID[i]}" "${P_TYPE[i]}" \
+    "$(awk -v s="${P_SIZE[i]}" 'BEGIN { printf "%.1f", s / 1073741824 }')" "${P_OFF[i]}" "${P_UUID[i]}" "${P_NAME[i]}"
+}
+
+# --- recognize: Apple ISC, the booted macOS, [our group], Apple Recovery ----
+# Sets isc_uuid isc_off mac_uuid mac_off rec_uuid rec_off target kind
+# (free|install), and for an install M_UUID/M_KIND/M_OFF/M_SIZE[0..m-1]
+# (stub first), stub_group, stub_system, stub_name, esp_index.
+recognize() {
+  local i c last k kinds="" nstub=0 refuse=""
+  if [ $n -lt 3 ] || [ "${P_TYPE[0]}" != Apple_APFS_ISC ] || [ "${P_TYPE[1]}" != Apple_APFS ] ||
+     [ "${P_UUID[1]}" != "$mac_store_uuid" ] || [ "${P_TYPE[n - 1]}" != Apple_APFS_Recovery ]; then
+    i=0; while [ $i -lt $n ]; do describe $i; i=$((i + 1)); done
+    die "this disk is not Apple ISC, the running macOS, ..., Apple Recovery; not touching it"
+  fi
+  c=$(container_on "${P_ID[1]}") && [ "${C_REF[c]}" = "$mac_ref" ] ||
+    die "the running macOS's container ($mac_ref) is not on ${P_ID[1]}"
+  last=$((n - 1))
+  isc_uuid=${P_UUID[0]} isc_off=${P_OFF[0]}
+  mac_uuid=${P_UUID[1]} mac_off=${P_OFF[1]} mac_size=${P_SIZE[1]} mac_id=${P_ID[1]}
+  rec_uuid=${P_UUID[last]} rec_off=${P_OFF[last]}
+  target=$((rec_off - mac_off))
+  if [ $n -eq 3 ]; then
+    [ $((rec_off - mac_off - mac_size)) -ge $GiB ] ||
+      die "nothing to remove: no installation, and less than 1 GiB free between macOS and Recovery"
+    kind=free m=0
+    return 0
+  fi
+  M_UUID=() M_KIND=() M_OFF=() M_SIZE=() M_ID=()
+  m=0 i=2
+  while [ $i -lt $last ]; do
+    k=$(classify $i)
+    M_UUID[m]=${P_UUID[i]} M_KIND[m]=$k M_OFF[m]=${P_OFF[i]} M_SIZE[m]=${P_SIZE[i]} M_ID[m]=${P_ID[i]}
+    kinds="$kinds $k"
+    [ "$k" != stub ] || nstub=$((nstub + 1))
+    m=$((m + 1)) i=$((i + 1))
+  done
+  case $kinds in
+    *othersystem*) refuse="another macOS (or an APFS container that is not a stub) is between macOS and Recovery" ;;
+    *foreign*) refuse="a partition that is not part of an installation is between macOS and Recovery" ;;
+  esac
+  [ -n "$refuse" ] || [ $nstub -eq 1 ] || {
+    if [ $nstub -eq 0 ]; then refuse="no stub: a partial installation, which this does not repair"
+    else refuse="$nstub stubs: more than one installation"; fi
+  }
+  if [ -z "$refuse" ]; then
+    case "$kinds " in
+      " stub esp "|" stub esp linux "|" stub esp linux linux ") ;;
+      *) refuse="the layout is not stub, ESP, then up to two Linux partitions:$kinds" ;;
+    esac
+  fi
+  [ -n "$refuse" ] || [ "${M_SIZE[1]}" -le $((5 * GiB / 2)) ] || refuse="the ESP is larger than 2.5 GiB"
+  i=1
+  while [ -z "$refuse" ] && [ $i -lt $m ]; do
+    [ $((M_OFF[i] - M_OFF[i - 1] - M_SIZE[i - 1])) -lt $((16 * MiB)) ] ||
+      refuse="a gap of 16 MiB or more between ${M_ID[i - 1]} and ${M_ID[i]}"
+    i=$((i + 1))
+  done
+  if [ -n "$refuse" ]; then
+    i=0; while [ $i -lt $n ]; do describe $i; i=$((i + 1)); done
+    die "refusing: $refuse. Nothing was changed."
+  fi
+  classify 2 >/dev/null   # sets stub_group/stub_system/stub_name for the stub (member 0)
+  esp_index=3 kind=install
+}
+
+# --- evidence on the ESP: m1n1/boot.bin, asahi/stub_info.json -------------
+evidence() {
+  local esp=${P_ID[esp_index]} mp vgid v
+  query "$tmp/e.info" info -plist "$esp"
+  v=$(need "$tmp/e.info" DiskUUID)
+  [ "$(upper "$v")" = "${M_UUID[1]}" ] && [ "$(get "$tmp/e.info" Content)" = EFI ] || die "$esp changed while being read"
+  mp=$(get "$tmp/e.info" MountPoint || true)
+  if [ -z "$mp" ]; then
+    mp=$tmp/esp
+    mkdir -p "$mp"
+    diskutil mount readOnly nobrowse -mountPoint "$mp" "$esp" >/dev/null 2>&1 || die "could not mount $esp read-only"
+    mounted=$esp
+  fi
+  if [ ! -s "$mp/m1n1/boot.bin" ] && [ ! -s "$mp/asahi/stub_info.json" ]; then
+    die "refusing: $esp has neither m1n1/boot.bin nor asahi/stub_info.json, so it is not this stub's ESP. Nothing was changed."
+  fi
+  evidence_text="m1n1/boot.bin $([ -s "$mp/m1n1/boot.bin" ] && echo present || echo absent)"
+  if [ -s "$mp/asahi/stub_info.json" ]; then
+    vgid=$(tr -d '\n' <"$mp/asahi/stub_info.json" | grep -io '"vgid"[[:space:]]*:[[:space:]]*"[0-9a-f-]*"' | head -n 1 |
+      sed 's/.*"\([0-9A-Fa-f-]*\)"$/\1/') || true
+    [ -n "$vgid" ] || die "refusing: $esp's asahi/stub_info.json names no vgid. Nothing was changed."
+    [ "$(upper "$vgid")" = "$stub_group" ] ||
+      die "refusing: $esp's asahi/stub_info.json names volume group $vgid, not the stub's $stub_group. Nothing was changed."
+    evidence_text="$evidence_text, asahi/stub_info.json names the stub's volume group"
+  else
+    evidence_text="$evidence_text, no asahi/stub_info.json"
+  fi
+  if [ -n "$mounted" ]; then
+    diskutil unmount "$mounted" >/dev/null 2>&1 || die "could not unmount $mounted after reading it"
+    mounted=""
+    rmdir "$mp" 2>/dev/null || true
+  fi
+}
+
+# --- startup disk: bless --getBoot and the boot-volume NVRAM variables -----
+# Sets startup to macos, next (a next-start-only choice of something else),
+# other or unknown, and startup_text.
+nv_target() { # VALUE -> "PARTUUID:VGUUID" (upper case) from GUID:PARTUUID:VGUUID
+  local v
+  v=$(upper "$1")
+  printf '%s\n' "$v" | awk -F: 'NF == 3 { print $2 ":" $3 }'
+}
+startup_check() {
+  local dev id store suuid parent group nvb="" nva="" mac
+  mac="$mac_uuid:$mac_group"
+  nvram -p >"$tmp/nvram" 2>/dev/null || true
+  nvb=$(awk -F'\t' '$1 == "boot-volume" { print $2 }' "$tmp/nvram" | head -n 1)
+  nva=$(awk -F'\t' '$1 == "alt-boot-volume" { print $2 }' "$tmp/nvram" | head -n 1)
+  if [ -n "$nva" ]; then
+    if [ "$(nv_target "$nva")" != "$mac" ] || [ "$(nv_target "$nvb")" != "$mac" ]; then
+      startup=next startup_text="the next start is set to another system (alt-boot-volume)"
+      return 0
+    fi
+  fi
+  startup=unknown startup_text="unknown"
+  dev=$(bless --getBoot 2>/dev/null | head -n 1) || return 0
+  case $dev in /dev/disk*) ;; *) return 0 ;; esac
+  case $dev in *" "*) return 0 ;; esac
+  id=${dev#/dev/}
+  diskutil info -plist "$id" >"$tmp/b.info" 2>/dev/null || return 0
+  has "$tmp/b.info" APFSPhysicalStores.0 && ! has "$tmp/b.info" APFSPhysicalStores.1 || return 0
+  store=$(get "$tmp/b.info" APFSPhysicalStores.0.APFSPhysicalStore) || return 0
+  diskutil info -plist "$store" >"$tmp/b.store" 2>/dev/null || return 0
+  suuid=$(upper "$(get "$tmp/b.store" DiskUUID || true)")
+  parent=$(get "$tmp/b.store" ParentWholeDisk || true)
+  if [ "$suuid" = "$mac_uuid" ] && [ "$parent" = "$disk" ]; then
+    group=$(upper "$(get "$tmp/b.info" APFSVolumeGroupID || true)")
+    [ "$group" = "$mac_group" ] || return 0
+    [ -z "$nvb" ] || [ "$(nv_target "$nvb")" = "$mac" ] || return 0
+    startup=macos startup_text="the running macOS"
+  else
+    startup=other startup_text="\"$(get "$tmp/b.info" VolumeName || echo "$id")\" ($id)"
+  fi
+}
+
+password=""
+read_password() {
+  [ -n "$owner" ] || die "the startup disk is $startup_text, not this macOS: setting macOS first needs a machine owner.
+  Rerun with --owner USER and that user's password as the first line of standard input. Nothing was changed."
+  if [ -t 0 ]; then printf 'Password for %s: ' "$owner"; fi
+  IFS= read -r -s password || [ -n "$password" ] || die "no password for $owner on standard input. Nothing was changed."
+  if [ -t 0 ]; then echo; fi
+  [ -n "$password" ] || die "the password for $owner is empty. Nothing was changed."
+}
+bless_macos() { # [--nextonly]
+  local out rc=0
+  out=$(printf '%s\n' "$password" | bless --mount / --setBoot "$@" --user "$owner" --stdinpass 2>&1) || rc=$?
+  if [ $rc -ne 0 ]; then
+    out=${out//"$password"/***}
+    out=$(printf '%s\n' "$out" | tail -n 3)
+    die "bless could not set macOS as the startup disk$( [ $# -eq 0 ] || echo " for the next start") (exit $rc): $out
+  Wrong password, or $owner is not a machine owner? Nothing was deleted."
+  fi
+}
+set_macos_startup() {
+  bless_macos
+  note "blessed the running macOS as the startup disk"
+  startup_check
+  if [ "$startup" = next ]; then
+    bless_macos --nextonly
+    note "blessed the running macOS for the next start too"
+    startup_check
+  fi
+  [ "$startup" = macos ] || die "after bless the startup disk is still $startup_text. Nothing was deleted; check Startup Disk in System Settings."
+}
+
+# --- execution: re-read the disk before every change ------------------------
+frame_unchanged() {
+  [ "${P_UUID[0]}" = "$isc_uuid" ] && [ "${P_OFF[0]}" = "$isc_off" ] &&
+    [ "${P_UUID[1]}" = "$mac_uuid" ] && [ "${P_OFF[1]}" = "$mac_off" ] &&
+    [ "${P_UUID[n - 1]}" = "$rec_uuid" ] && [ "${P_OFF[n - 1]}" = "$rec_off" ] ||
+    die "the Apple ISC, macOS or Recovery partition changed; stopping. Done so far:${done_list:- nothing}. Left:${left_list:- nothing}"
+}
+protected() { # UUID
+  [ "$1" = "$isc_uuid" ] || [ "$1" = "$mac_uuid" ] || [ "$1" = "$rec_uuid" ]
+}
+done_list="" left_list=""
+stop_partway() { die "$1
+  Done so far:${done_list:- nothing}. Left:${left_list:- nothing}.
+  Do not rerun blindly: read 'diskutil list $disk', then rerun this script (it re-reads the disk)."; }
+remove_member() { # member index
+  local j=$1 i id
+  snapshot
+  frame_unchanged
+  i=$(part_by_uuid "${M_UUID[j]}") || stop_partway "${M_KIND[j]} ${M_UUID[j]} is gone before its step"
+  id=${P_ID[i]}
+  [ "${P_OFF[i]}" = "${M_OFF[j]}" ] && [ "${P_SIZE[i]}" = "${M_SIZE[j]}" ] ||
+    stop_partway "$id (${M_UUID[j]}) moved or changed size since it was reviewed"
+  ! protected "${P_UUID[i]}" || die "internal error: refusing to touch a protected partition $id"
+  [ "$id" != "$mac_id" ] && [ "$i" -gt 1 ] && [ "$i" -lt $((n - 1)) ] || die "internal error: $id is not between macOS and Recovery"
+  if [ "${M_KIND[j]}" = stub ]; then
+    say "deleting the stub container on $id (${M_UUID[j]})"
+    diskutil apfs deleteContainer "$id" || stop_partway "diskutil apfs deleteContainer $id failed (a volume busy? nothing is forced)"
+  else
+    say "deleting the ${M_KIND[j]} partition $id (${M_UUID[j]})"
+    diskutil eraseVolume free none "$id" || stop_partway "diskutil eraseVolume free none $id failed"
+  fi
+  snapshot
+  frame_unchanged
+  ! part_by_uuid "${M_UUID[j]}" >/dev/null || stop_partway "${M_KIND[j]} $id is still there after its step"
+}
+
+grow_macos() {
+  local limit
+  snapshot
+  frame_unchanged
+  [ $n -eq 3 ] || stop_partway "partitions are still between macOS and Recovery"
+  mac_id=${P_ID[1]}
+  query "$tmp/limits" apfs resizeContainer "$mac_id" limits -plist
+  limit=$(num "$tmp/limits" MaximumSize)
+  [ $((limit + MiB)) -ge "$target" ] ||
+    stop_partway "macOS can only grow to $limit bytes, not $target; its container was not resized"
+  say "growing the macOS container $mac_id to $target bytes"
+  diskutil apfs resizeContainer "$mac_id" 0 || stop_partway "diskutil apfs resizeContainer $mac_id 0 failed"
+  snapshot
+  frame_unchanged
+  [ $n -eq 3 ] || stop_partway "a partition appeared between macOS and Recovery"
+  [ $((P_SIZE[1] + MiB)) -ge "$target" ] && [ "${P_SIZE[1]}" -le $((target + MiB)) ] ||
+    stop_partway "macOS is ${P_SIZE[1]} bytes after growing, not $target"
+}
+
+# --- main --------------------------------------------------------------------
+snapshot
+recognize
+say "disk $disk: macOS store ${P_ID[1]} ($mac_uuid), $(awk -v s="$mac_size" 'BEGIN { printf "%.1f", s / 1073741824 }') GiB"
+i=0; while [ $i -lt $n ]; do describe $i; i=$((i + 1)); done
+if [ "$kind" = free ]; then
+  say "no installation; $(( (target - mac_size) / MiB )) MiB free between macOS and Recovery"
+  echo "Plan: grow the macOS container ${P_ID[1]} to $target bytes."
+  if [ $yes -eq 0 ]; then echo "Dry run: nothing changed. Add --yes to do it."; exit 0; fi
+  done_list="" left_list=" grow macOS"
+  grow_macos
+  say "done: macOS ${P_ID[1]} is $target bytes"
+  exit 0
+fi
+
+evidence
+startup_check
+say "found \"$stub_name\": stub ${M_ID[0]}, ESP ${M_ID[1]}, Linux:$(j=2; while [ $j -lt $m ]; do printf ' %s' "${M_ID[j]}"; j=$((j + 1)); done; [ $m -gt 2 ] || printf ' none')"
+note "evidence: $evidence_text"
+note "startup disk: $startup_text"
+echo "Plan:"
+if [ "$startup" != macos ]; then
+  echo "  0. set the running macOS as the startup disk (bless, needs --owner and its password)"
+fi
+j=0
+while [ $j -lt $m ]; do
+  case ${M_KIND[j]} in
+    stub) echo "  $((j + 1)). diskutil apfs deleteContainer ${M_ID[j]}   (\"$stub_name\", ${M_UUID[j]})" ;;
+    *) echo "  $((j + 1)). diskutil eraseVolume free none ${M_ID[j]}   (${M_KIND[j]}, ${M_UUID[j]})" ;;
+  esac
+  left_list="$left_list ${M_KIND[j]} ${M_UUID[j]};"
+  j=$((j + 1))
+done
+echo "  $((m + 1)). diskutil apfs resizeContainer ${P_ID[1]} 0   (macOS grows to $target bytes)"
+left_list="$left_list grow macOS"
+if [ $yes -eq 0 ]; then
+  [ "$startup" = macos ] || [ -n "$owner" ] || echo "Step 0 needs --owner USER (a machine owner) and the password on standard input."
+  echo "Dry run: nothing changed. Add --yes to do it."
+  exit 0
+fi
+
+if [ "$startup" != macos ]; then
+  read_password
+  set_macos_startup
+  password=""
+fi
+j=0
+while [ $j -lt $m ]; do
+  remove_member $j
+  done_list="$done_list ${M_KIND[j]} ${M_UUID[j]} removed;"
+  left_list=${left_list#* ${M_KIND[j]} ${M_UUID[j]};}
+  j=$((j + 1))
+done
+grow_macos
+startup_check
+[ "$startup" = macos ] || echo "warning: the startup disk now reads as $startup_text; set macOS in System Settings, Startup Disk"
+say "done: \"$stub_name\" removed; macOS ${P_ID[1]} is ${P_SIZE[1]} bytes; startup disk: $startup_text"
+echo "Log: $log"
