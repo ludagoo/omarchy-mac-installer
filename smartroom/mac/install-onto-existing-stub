@@ -165,13 +165,13 @@ echo "Boot $bootp, Root $rootp"
 say "3/4 writing boot.img to $bootp and root.img to $rootp"
 write_image() { # member partition size
   local want blocks have
-  blocks=$(( $3 / 4194304 ))
-  [ $(( blocks * 4194304 )) = "$3" ] || die "$1 is not a multiple of 4 MiB"
-  tar -xOf "$zip" "$1" | dd of="/dev/r$2" bs=4m 2>/dev/null
+  blocks=$(( $3 / 1048576 ))
+  [ $(( blocks * 1048576 )) = "$3" ] || die "$1 is not a multiple of 1 MiB"
+  tar -xOf "$zip" "$1" | dd of="/dev/r$2" ibs=64k obs=1m 2>/dev/null
   sync
   if [ "$1" = boot.img ] || [ $readback = 1 ]; then
     want=$(tar -xOf "$zip" "$1" | shasum -a 256 | awk '{print $1}')
-    have=$(dd if="/dev/r$2" bs=4m count="$blocks" 2>/dev/null | shasum -a 256 | awk '{print $1}')
+    have=$(dd if="/dev/r$2" bs=1m count="$blocks" 2>/dev/null | shasum -a 256 | awk '{print $1}')
     [ "$have" = "$want" ] || die "$1 read back from $2 does not match ($have != $want)"
     echo "$1: written and read back ($want)"
   else

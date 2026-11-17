@@ -1,0 +1,25 @@
+# SmartRoom Firmware: wired Ethernet on the Mac Studio's AQC113 (atlantic).
+# The port must accept all MAC addresses (promiscuous) or the chip drops the
+# DHCP and IPv6 router replies meant for it (omacom/omarchy-mac-pkgs#137;
+# seen on our M2 Max Studio 2026-11-17). Same DHCP client id as macOS.
+[connection]
+id=SmartRoom wired
+uuid=3f77e3ff-44fc-42f6-98a7-2ee66c765605
+type=ethernet
+autoconnect-priority=10
+
+[ethernet]
+accept-all-mac-addresses=1
+
+[match]
+driver=atlantic;
+
+[ipv4]
+dhcp-client-id=mac
+method=auto
+
+[ipv6]
+addr-gen-mode=default
+method=auto
+
+[proxy]

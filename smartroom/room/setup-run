@@ -53,6 +53,10 @@ printf '[Unit]\nAfter=omarchy-mac-first-boot.service omarchy-provision-hardware.
   >/etc/systemd/system/smartroomos-firstboot.service.d/10-after-omarchy-first-boot.conf
 install -D -m 0644 "$fw/builder/image/rootfs/etc/NetworkManager/conf.d/smartroomos-dhcp-client-id.conf" \
   /etc/NetworkManager/conf.d/smartroomos-dhcp-client-id.conf
+# The Studio AQC113 drops replies unless its port accepts all MAC addresses
+# (omacom/omarchy-mac-pkgs#137). NetworkManager only reads 0600 root keyfiles.
+install -D -m 0600 "$here/smartroom-wired.nmconnection" \
+  /etc/NetworkManager/system-connections/smartroom-wired.nmconnection
 
 # The studio setup, unchanged, in image mode. Its pacman.conf merge and mirror
 # list switch go to scratch copies: the image keeps Omarchy's stable template.
