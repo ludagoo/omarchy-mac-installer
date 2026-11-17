@@ -22,7 +22,8 @@ Omarchy's Chromium, the room package list and the room's own files.
 | --- | --- | --- | --- | --- |
 | 1 | `CARRY.md`, `smartroom/sync-upstream.sh` | This file and the sync script | No (ours) | Never |
 | 2 | `image-builder`: `build-mac-image --smartroom DIR` (one profile switch; every hunk is `profile == smartroom`), plus `mac-image-check payload --os-name` and the `smartroom` profile, `finalize-root --headless`, `package_record.py --local-repository/--not-installed` | Builds the headless image from the same stable channel record as Omarchy's: no `omarchy`/`omarchy-settings`/desktop lists; our `omarchy-mac-boot` and `smartroom-omarchy-helpers` from a signed local repo; `omarchy-apply-system` replaced by the two runtime steps the boot chain needs (`install/config/snapper.sh`, the hardware deferral with `platform-setup.sh`, both the runtime's own code); no owner provisioning, Plymouth splash or display manager; the room layer runs as `setup/run` before the initramfs; the picker/stub/Limine name is "SmartRoom Firmware"; the ESP carries `omarchy/install.conf` `encrypt=0`. The setup tree is handed to root (`chown -R 0:0`) as it enters the image root: it comes from the host's build user (uid 1000, which is the room's own user in the image). The Omarchy release inspection (which holds the desktop runtime) is skipped for this profile; `smartroom/desk-check` and omarchy-mac-boot's own `omarchy-apple-silicon-boot-check` check the boot chain instead. The stock build is unchanged (the builder's own `image-builder/test/all` passes). | Partly: "build-mac-image: a headless profile without the desktop runtime" could be offered to omacom as a draft once rooms prove it | omacom ships a headless profile |
-| 3 | `smartroom/`: `room/` (package list, Apple-list drops, overlay exclusions, `owner-allow`, the AQC113 wired profile, `setup-run`), `build-packages`, `build-image`, `desk-check`, `mac/engine-install`, `mac/remove-firmware`, `mac/smartroom-boot-os`, `mac/install-onto-existing-stub`, `test/` (+ `docs/`, among them `install-zoom-room.md`) | Our layer and tooling only; nothing upstream reads it | No (ours) | Never |
+| 3 | `smartroom/`: `room/` (package list, Apple-list drops, overlay exclusions, `owner-allow`, the AQC113 wired profile, `setup-run`), `build-packages`, `build-image`, `desk-check`, `recovery-branding`, `mac/engine-install`, `mac/remove-firmware`, `mac/smartroom-boot-os`, `mac/install-onto-existing-stub`, `mac/build-recovery-app`, `test/` (+ `docs/`, among them `install-zoom-room.md` and `recovery-app.md`) | Our layer and tooling only; nothing upstream reads it | No (ours) | Never |
+| 4 | `Recovery/`: SmartRoom Firmware branding of the native Recovery app that 1TR runs ("Finish setup"). Three new files: `Sources/SmartRoomBrand.swift` (every shown name), `Sources/SmartRoomWordmark.swift` (the banner, same 400 × 94 frame), `Sources/SmartRoomSnapshots.swift` (preview builds only: `--smartroom-snapshots DIR` saves every screen). One-line hunks: the shown strings in `main.swift`, `InstallerView.swift`, `EnrollmentGate.swift`, `AuthorizationPrompt.swift`, `RecoveryActions.swift`, `RecoveryOwner.swift`, `Account/RecoveryAccountCore.swift` (the recovery account's full name), the preview hook in `main.swift`; `CFBundleName` in `build-app.sh` and `Resources/en.lproj/InfoPlist.strings`; `build-app.sh` puts the MIT `LICENSE` in the bundle; `test-all.sh` compiles `SmartRoomBrand.swift` into each fixture; `Tests/AuthorizationPromptCheck.swift` expects the new prompt. Layout, sizes, colours and flow are upstream's. | Techs installing a room see this app in 1TR (and hear it with VoiceOver); it must say SmartRoom Firmware, not Omarchy. Kept on purpose, because the pinned Engine (`omarchy_recovery.validate_source`), the image builder (`recovery_app.py`) and the stub layout match on them and none is drawn: the bundle `<INSTALLER_RECOVERY_APP_NAME>.app`, its `CFBundleDisplayName` (Engine contract, see [recovery-app.md](smartroom/docs/recovery-app.md#what-still-says-omarchy)), the executable `OmarchyRecovery`, the bundle identifier, `OmarchyRecoveryBuildMode`, the `Omarchy*` type names and the `Aurora/`/`omarchy-*` paths. | Partly: "make the Recovery app's product name a build setting" (one constant, and the Engine reading the display name from the manifest instead of a literal) | omacom makes the Recovery app's name configurable |
 
 ### Not carried (brief task 3f)
 
@@ -60,7 +61,7 @@ On an aarch64 Arch Linux host with Docker (studio-build):
 
 ```sh
 image-builder/bin/mac-image-inputs resolve INPUTS --channel-set --channel stable --release-tag v4.5.0 \
-  --recovery-app REC --cache CACHE            # REC: esp/aurora/recovery from the official stable zip
+  --recovery-app REC --cache CACHE            # REC: OUT/recovery of smartroom/mac/build-recovery-app (patch 4)
 image-builder/bin/build-mac-image --inputs INPUTS --recovery-app REC --cache CACHE OUT       # stock (baseline)
 SMARTROOM_PKG_KEY=<fpr> smartroom/build-packages PKGS                                      # our two packages
 smartroom/build-image --inputs INPUTS --recovery-app REC --cache CACHE --packages PKGS \
@@ -72,7 +73,32 @@ bash smartroom/test/all                                                         
 `desk-check` fails on any file under `/etc`, `/usr` or `/opt` of the image
 owned by a non-root user or a user group (gid >= 1000) that
 `smartroom/room/owner-allow` does not list (it lists nothing), and runs
-`visudo -c` in the image.
+`visudo -c` in the image. It also fails if the image's Recovery app
+(`esp/aurora/recovery`) is not the SmartRoom build or still shows Omarchy
+(`smartroom/recovery-branding app`).
+
+The Recovery app is the one input built on a Mac (Swift/AppKit):
+`smartroom/mac/build-recovery-app --screens OUT` builds it from this checkout,
+checks it as the image builder and the pinned Engine will, and saves every
+screen ([recovery-app.md](smartroom/docs/recovery-app.md)). Its manifest
+digest (`OUT/recovery.sha256`) is the inputs' `recovery_app_manifest_sha256`:
+resolve with `--recovery-app OUT/recovery`, or, to keep a release's channel
+inputs, copy its inputs file and replace only that line.
+
+### Patch 4 on an upstream sync
+
+1. Rebase. A conflict in patch 4 is a one-line string: take upstream's new
+   wording and put `SmartRoomBrand.osName`/`.appName` where it names the
+   product.
+2. `python3 smartroom/recovery-branding source` (also in `smartroom/test/all`)
+   lists every Omarchy/Aurora string literal upstream added to
+   `Recovery/Sources`. Brand it the same way, or, if it is only a path or an
+   identifier that never reaches the screen, add it to `INTERNAL_LITERALS`
+   there.
+3. If upstream changed the Engine's Recovery contract (`omarchy_recovery.py`:
+   `APP_NAME`, the `CFBundleDisplayName` check), follow it; never brand those.
+4. On a Mac: `smartroom/mac/build-recovery-app --screens OUT`, look through
+   `OUT/screens`, then build the image with `OUT/recovery` and desk-check it.
 
 ## Branches
 

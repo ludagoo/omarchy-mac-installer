@@ -95,7 +95,7 @@ From the Mini, copy the tools and the release to the Mac (`MAC` is the Mac's
 address, `ADMIN` the owner account):
 
 ```sh
-REL=~/smartroom-omarchy-fork/release/smartroom-2
+REL=~/smartroom-omarchy-fork/release/smartroom-3
 REPO=~/smartroom-omarchy-fork/work/omarchy-mac-installer
 ssh ADMIN@MAC 'mkdir -p smartroom/smartroom/mac smartroom/Engine smartroom/Packaging smartroom/image'
 scp $REPO/smartroom/mac/engine-install $REPO/smartroom/mac/remove-firmware $REPO/smartroom/mac/smartroom-boot-os ADMIN@MAC:smartroom/smartroom/mac/

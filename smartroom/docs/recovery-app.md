@@ -53,7 +53,31 @@ layout, so they stay:
 - text the app does not own: macOS's own tools' output in Show Details
   (bputil, kmutil, bless), and the `aura` command's name.
 
-MEASURED
+Measured on the home Studio (macOS 14.5, CLT 16.2, preview build of
+`6dcf34a`, `OUT/screens/install/names.txt`):
+
+| What macOS reports | Value |
+| --- | --- |
+| window title, its accessibility title (VoiceOver) | SmartRoom Firmware Installer |
+| the app's accessibility title (VoiceOver's app name) | SmartRoom Firmware Installer |
+| app menu, About panel, Help alert | SmartRoom Firmware Installer |
+| banner accessibility label | SmartRoom Firmware |
+| `NSRunningApplication.localizedName` (LaunchServices) | **Omarchy Installer** |
+
+LaunchServices names a running app by its `CFBundleDisplayName`, so wherever
+macOS itself lists running apps (Force Quit, Cmd-Tab) and wherever Recovery's
+Springboard shows the app it launches, it is "Omarchy Installer". The app
+cannot change that without the Engine refusing the image. Whether Recovery
+shows that name anywhere in 1TR is not verified (no fresh install was done in
+this job); the app opens full-size over it. Removing it needs either the
+upstream change in CARRY.md (patch 4, "Upstream PR candidate") or our own
+Engine build.
+
+Two of upstream's own sheet titles are wider than the 460-point sheet and are
+clipped in upstream too: "Start Recovery with the power butto…" and
+"Couldn't verify the recovery envir…" (`04d`, `04e`). The branded titles are
+kept short enough to fit ("Open the installer in Recovery", "Open the paired
+Recovery"); upstream's layout is not changed here.
 
 ## Rebuild after an upstream sync
 
@@ -85,4 +109,25 @@ sudo rm /tmp/.com.apple.dt.CommandLineTools.installondemand.in-progress
 
 ## Screens
 
-SCREENS
+`smartroom/mac/build-recovery-app --screens` writes these; the set for
+release-3 (app manifest `56ab72cb…`) is in
+`~/smartroom-omarchy-fork/release/smartroom-3/screens/` on the Mini, with
+`before-after-01.png` (upstream and SmartRoom side by side, same 780 × 440
+window).
+
+| File | Screen |
+| --- | --- |
+| `install/01-finish-setup` | Finish setup: the password request 1TR opens on |
+| `install/02-password-not-accepted` | a refused password, asked again in place |
+| `install/03-authorize-startup-disk` | the startup-disk repair password |
+| `install/04a`–`04e` | the wrong-Recovery and environment sheets |
+| `install/05-sheet-setup-failed` | a failure sheet |
+| `install/06-setting-up`, `07-sheet-show-details` | installing, and Utilities → Show Details (log viewer) |
+| `install/08-installation-complete` | the finished screen (Restart) |
+| `install/09`–`13` | the optional recovery account form, its sheets and resume |
+| `install/14-about-panel`, `15-help-alert` | About and Help |
+| `recovery/r1`–`r3` | the repair flow (Repair startup, Restoring, Recovery complete) |
+| `*/menus.txt`, `*/names.txt` | every menu item; the names macOS reports |
+
+Each `.png` has a `.txt` beside it with every title, label, button, placeholder
+and accessibility label on that screen.
