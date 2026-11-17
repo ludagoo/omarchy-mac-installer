@@ -224,7 +224,8 @@ meta = json.load(open(env["OMARCHY_ENGINE_METADATA"]))["os_list"][0]
 assert os.path.basename(env["OMARCHY_ENGINE_PAYLOAD"]) == meta["package"]
 assert os.stat(env["OMARCHY_RESTORE_IMAGE"]).st_mode & 0o777 == 0o500
 assert env["OMARCHY_RESTORE_IMAGE_REQUIREMENT"].startswith(f'identifier "{RID}"')
-assert env["DISTRO"] == "Omarchy" and env["OMARCHY_INSTALLER_NAME"]
+assert env["DISTRO"] == "SmartRoom Firmware", env["DISTRO"]
+assert env["OMARCHY_INSTALLER_NAME"] == "SmartRoom Firmware Installer", env["OMARCHY_INSTALLER_NAME"]
 for leak in ("OMARCHY_RECOVERY_APP", "OMARCHY_RECOVERY_MANIFEST", "OMARCHY_RECOVERY_REQUIREMENT"):
     assert leak not in env, leak
 owner = env["OMARCHY_MACHINE_OWNER"]
@@ -382,6 +383,9 @@ v=$t/vol/$esp
 cmp -s "$v/asahi/extras/firstboot.env" "$t/fb.env" || fail "firstboot.env not on the ESP"
 grep -q 'startup disk: SmartRoom Firmware (disk5s1' "$t/out" || fail "default boot not confirmed: $(tail -20 "$t/out")"
 grep -q 'Cmd+F5' "$t/out" && grep -q 'Control+Option+Space' "$t/out" || fail "no VoiceOver steps"
+grep -q 'SmartRoom Firmware Installer opens on its "Finish setup" screen' "$t/out" || fail "1TR step 5 does not name the app: $(grep -n '5\.' "$t/out")"
+! sed -n '/^== Stage 1 done/,/^Run record/p' "$t/out" | grep -v '^Run record' | grep -qi omarchy ||
+  fail "the 1TR steps name Omarchy: $(sed -n '/^== Stage 1 done/,/^Run record/p' "$t/out" | grep -in omarchy)"
 ! grep -rqF "$PW" "$st" || fail "the password is in the state directory"
 echo "ok - ESP has install.conf encrypt=0 and firstboot.env; the stub is the default startup disk; 1TR steps printed"
 

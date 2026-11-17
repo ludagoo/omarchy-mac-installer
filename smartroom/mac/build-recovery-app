@@ -1,0 +1,96 @@
+#!/bin/bash
+# Build the SmartRoom Firmware-branded Recovery app (CARRY.md patch 4) on a Mac
+# and check it the way the image builder and the pinned Engine will:
+#
+#   smartroom/mac/build-recovery-app [--screens] OUT
+#
+# Needs Apple's Command Line Tools (xcrun swift, codesign, python3); install
+# them headless first (softwareupdate), never through the GUI prompt.
+#   OUT/recovery/       the image input: <app>.app + omarchy-recovery-app.json
+#                       (build-image --recovery-app OUT/recovery; its manifest
+#                       sha256 is recovery_app_manifest_sha256 in the inputs)
+#   OUT/recovery.sha256 that manifest digest; OUT/SOURCE the checkout it came from
+#   OUT/preview/        the preview build (cannot enroll or change anything)
+#   OUT/screens/        with --screens: every screen and sheet of both preview
+#                       flows (install, repair) as PNG + text, names.txt, menus.txt.
+#                       Needs a user logged in at the Mac's screen (display or not).
+set -euo pipefail
+screens=0
+[[ ${1:-} != --screens ]] || { screens=1; shift; }
+out=${1:?usage: smartroom/mac/build-recovery-app [--screens] OUT}
+repo=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
+[[ $(uname -s) == Darwin ]] || { echo "build-recovery-app runs on a Mac" >&2; exit 1; }
+[[ -x /Library/Developer/CommandLineTools/usr/bin/swift || -d /Applications/Xcode.app ]] || {
+  echo "no Command Line Tools; install them headless first (see smartroom/docs/recovery-app.md)" >&2
+  exit 1
+}
+app=$(sed -n 's/^INSTALLER_RECOVERY_APP_NAME="\(.*\)"$/\1/p' "$repo/Packaging/identity.conf").app
+mkdir -p "$out"
+out=$(cd -- "$out" && pwd)
+exec > >(tee -a "$out/build.log") 2>&1
+echo "== $(date) build-recovery-app from $repo ($(git -C "$repo" rev-parse HEAD 2>/dev/null || echo 'not a git checkout'))"
+{
+  echo "source=$(git -C "$repo" rev-parse HEAD 2>/dev/null || echo unknown)"
+  echo "dirty=$(git -C "$repo" status --porcelain -- Recovery Engine/overlay/src 2>/dev/null | wc -l | tr -d ' ')"
+  echo "built_on=$(sw_vers -productVersion) $(xcrun swift --version 2>/dev/null | head -n 1)"
+} >"$out/SOURCE"
+
+# Each mode in its own copy: SwiftPM caches the manifest, which reads the mode.
+build() { # MODE
+  local work=$out/work-$1
+  rm -rf "$work" "$out/$1"
+  mkdir -p "$work/Engine/overlay"
+  (cd "$repo" && tar -cf - --exclude .build Recovery LICENSE) | (cd "$work" && tar -xf -)
+  rm -rf "$work/Recovery/build" "$work/Recovery"/build-*/
+  cp -R "$repo/Engine/overlay/src" "$work/Engine/overlay/src"
+  (cd "$work/Recovery" && ./build-app.sh "$1" "$out/$1")
+}
+build recovery
+build preview
+rm -rf "$out/recovery/checks" "$out/recovery/bundle-lookup-check" \
+  "$out/preview/checks" "$out/preview/bundle-lookup-check"
+
+echo "== checks"
+python3 "$repo/image-builder/builder/recovery_app.py" "$out/recovery" | tee "$out/recovery.sha256"
+PYTHONPATH="$repo/Engine/overlay/src" python3 - "$out/recovery/$app" "$out/recovery/omarchy-recovery-app.json" <<'PY'
+# The pinned Engine's own check of an image's Recovery app (with codesign).
+import sys
+import omarchy_recovery
+omarchy_recovery.validate_source(sys.argv[1], sys.argv[2])
+print("Engine omarchy_recovery.validate_source: accepted")
+PY
+python3 "$repo/smartroom/recovery-branding" app "$out/recovery"
+codesign --verify --deep --strict "$out/recovery/$app"
+codesign -dv "$out/recovery/$app" 2>&1 | grep -E '^(Identifier|Signature|CDHash)='
+
+(( screens )) || { echo "built $out/recovery ($(cat "$out/recovery.sha256"))"; exit 0; }
+user=$(stat -f %Su /dev/console)
+[[ $user != root && $user != loginwindow ]] || {
+  echo "nobody is logged in at the Mac's screen; screens skipped" >&2
+  exit 1
+}
+for flow in install recovery; do
+  dir=$out/screens/$flow
+  rm -rf "$dir"; mkdir -p "$dir"
+  arg=--preview; [[ $flow == install ]] || arg=--recovery-preview
+  chmod 777 "$dir"
+  # In the console user's GUI session, so AppKit reaches the window server.
+  sudo launchctl asuser "$(id -u "$user")" sudo -u "$user" \
+    open -n -W "$out/preview/$app" --args "$arg" --smartroom-snapshots "$dir" &
+  launcher=$!
+  for _ in $(seq 120); do
+    [[ -f $dir/names.txt ]] && break
+    sleep 1
+  done
+  sleep 2
+  pkill -f -- "--smartroom-snapshots $dir" 2>/dev/null || true
+  wait "$launcher" 2>/dev/null || true
+  [[ -f $dir/names.txt ]] || { echo "the $flow preview did not finish its screens" >&2; exit 1; }
+  echo "$flow: $(ls "$dir"/*.png | wc -l | tr -d ' ') screens in $dir"
+done
+cat "$out/screens/install/names.txt"
+! grep -l -i omarchy "$out"/screens/*/[0-9r]*.txt || {
+  echo "a screen names Omarchy (above)" >&2
+  exit 1
+}
+echo "built $out/recovery ($(cat "$out/recovery.sha256")); screens in $out/screens"

@@ -1,0 +1,192 @@
+#!/usr/bin/env python3
+"""Check that the native Recovery app shows SmartRoom Firmware, not Omarchy.
+
+  smartroom/recovery-branding source [REPO]     the Recovery sources (smartroom/test)
+  smartroom/recovery-branding app DIR|ZIP       a built app: DIR holds the .app
+                                                (build-recovery/, esp/aurora/recovery/),
+                                                or an OS package ZIP (desk-check)
+
+The brand is Recovery/Sources/SmartRoomBrand.swift (CARRY.md patch 4). Names
+the pinned Engine, the image builder or the stub layout match on stay: the
+bundle and its CFBundleDisplayName (Packaging/identity.conf
+INSTALLER_RECOVERY_APP_NAME), the executable, the bundle identifier, the
+Omarchy*/omarchy-* identifiers and the Aurora/Recovery paths. Everything else
+that can reach the screen or VoiceOver must not say Omarchy or Aurora.
+
+Limit: Swift keeps string literals of up to 15 bytes inside the code, so the
+app check sees only longer ones; the source check sees them all.
+Python 3 standard library only (Linux build hosts and macOS's python3).
+"""
+import os
+from pathlib import Path, PurePosixPath
+import plistlib
+import re
+import sys
+import zipfile
+
+ROOT = Path(__file__).resolve().parent.parent
+LITERAL = re.compile(r'"(?:[^"\\\n]|\\.)*"')
+BRANDED = re.compile(r"omarchy|aurora", re.I)
+# String literals in Recovery/Sources that only name files, paths, error
+# domains or the launch contract. Each must match one of these in full.
+INTERNAL_LITERALS = [
+    r"/Volumes/Omarchy",  # the preview build's stand-in target volume
+    r"Aurora/Recovery/[A-Za-z/._-]*",
+    r"private/var/db/omarchy-recovery-account/[A-Za-z/._-]*(\\\(UUID\(\)\.uuidString\))?",
+    r"AuroraInstallerLog",
+    r"aurora-installer-",
+    r"/tmp/aurora-installer-startup\.log",
+    r"\.aurora-var-(before|next)-",
+    r"(\\n)?# Aurora Recovery command(\\n.*)?",
+]
+# Bare "Omarchy"/"Aurora" words a built app may hold outside its Info.plist:
+# the launch contract's bundle name, the preview's stand-in volume and paths.
+BARE = re.compile(r"(?<![A-Za-z])(Omarchy|Aurora)(?![A-Za-z])")
+
+
+def conf(name):
+    text = (ROOT / "Packaging/identity.conf").read_text()
+    match = re.search(r'^%s="([^"]+)"$' % name, text, re.M)
+    if not match:
+        sys.exit(f"recovery-branding: no {name} in Packaging/identity.conf")
+    return match.group(1)
+
+
+def brand():
+    text = (ROOT / "Recovery/Sources/SmartRoomBrand.swift").read_text()
+    names = dict(re.findall(r'static let (\w+) = "([^"]+)"', text))
+    if not {"osName", "appName"} <= set(names):
+        sys.exit("recovery-branding: SmartRoomBrand.swift lacks osName/appName")
+    return names
+
+
+def strings_entries(text):
+    return dict(re.findall(r'^\s*"([^"]+)"\s*=\s*"([^"]*)";\s*$', text, re.M))
+
+
+def check_names(info, strings, names, contract, where, problems):
+    """Info.plist and en.lproj/InfoPlist.strings of the app (or of build-app.sh)."""
+    if info.get("CFBundleName") != names["appName"]:
+        problems.append(f"{where}: CFBundleName is {info.get('CFBundleName')!r}, not {names['appName']!r}")
+    if info.get("CFBundleDisplayName") != contract:
+        problems.append(f"{where}: CFBundleDisplayName {info.get('CFBundleDisplayName')!r} is not the Engine's {contract!r}")
+    for key, value in info.items():
+        if (isinstance(value, str) and BRANDED.search(value)
+                and key not in ("CFBundleDisplayName", "CFBundleExecutable", "CFBundleIdentifier")):
+            problems.append(f"{where}: Info.plist {key} = {value!r}")
+    if strings is not None:
+        entries = strings_entries(strings)
+        if entries.get("CFBundleName") != names["appName"]:
+            problems.append(f"{where}: InfoPlist.strings CFBundleName is {entries.get('CFBundleName')!r}")
+        if entries.get("CFBundleDisplayName") != contract:
+            problems.append(f"{where}: InfoPlist.strings lacks the Engine's CFBundleDisplayName line")
+        for key, value in entries.items():
+            if key != "CFBundleDisplayName" and BRANDED.search(value):
+                problems.append(f"{where}: InfoPlist.strings {key} = {value!r}")
+
+
+def source(repo):
+    global ROOT
+    ROOT = Path(repo).resolve()
+    names, contract = brand(), conf("INSTALLER_RECOVERY_APP_NAME")
+    problems = []
+    recovery = ROOT / "Recovery"
+    script = (recovery / "build-app.sh").read_text()
+    plist = dict(re.findall(r"<key>(\w+)</key><string>([^<]*)</string>", script))
+    check_names(plist, (recovery / "Resources/en.lproj/InfoPlist.strings").read_text(),
+                names, contract, "Recovery/build-app.sh + InfoPlist.strings", problems)
+    view = (recovery / "Sources/InstallerView.swift").read_text()
+    if "SmartRoomWordmark(frame:" not in view or "OmarchyWordmark(" in view:
+        problems.append("Recovery/Sources/InstallerView.swift: the banner is not SmartRoomWordmark")
+    files = sorted(recovery.glob("Sources/**/*.swift")) + sorted(recovery.glob("Native/*.[ch]"))
+    allowed = [re.compile(p) for p in INTERNAL_LITERALS + [re.escape(contract + ".app")]]
+    scanned = 0
+    for path in files:
+        if path.name == "OmarchyWordmark.swift":  # upstream's banner, no longer used
+            continue
+        scanned += 1
+        for number, line in enumerate(path.read_text().splitlines(), 1):
+            if line.lstrip().startswith(("//", "///", "*", "/*")):
+                continue
+            for literal in LITERAL.findall(line):
+                body = literal[1:-1]
+                if BRANDED.search(body) and not any(p.fullmatch(body) for p in allowed):
+                    problems.append(f"{path.relative_to(ROOT)}:{number}: {literal}")
+    if scanned < 20:
+        problems.append(f"only {scanned} Recovery source files found under {recovery}")
+    return problems, f"{scanned} Recovery source files and the bundle names"
+
+
+def runs(data):
+    """Printable runs of at least 4 bytes, as strings(1) finds them (UTF-8 kept)."""
+    for match in re.finditer(rb"[\x20-\x7e\x80-\xff\t\n]{4,}", data):
+        yield match.group().decode("utf-8", "replace")
+
+
+def app(target):
+    names, contract = brand(), conf("INSTALLER_RECOVERY_APP_NAME")
+    bundle = contract + ".app"
+    files = {}
+    target = Path(target)
+    if target.is_file():
+        prefix = "esp/aurora/recovery/" + bundle + "/"
+        with zipfile.ZipFile(target) as archive:
+            for item in archive.infolist():
+                if item.filename.startswith(prefix) and not item.is_dir():
+                    files[item.filename[len(prefix):]] = archive.read(item)
+    else:
+        app_dir = target / bundle
+        for path in sorted(app_dir.rglob("*")):
+            if path.is_file() and not path.is_symlink():
+                files[path.relative_to(app_dir).as_posix()] = path.read_bytes()
+    if "Contents/Info.plist" not in files:
+        return [f"no {bundle}/Contents/Info.plist in {target}"], ""
+    problems = []
+    info = plistlib.loads(files["Contents/Info.plist"])
+    strings_name = "Contents/Resources/en.lproj/InfoPlist.strings"
+    strings = files.get(strings_name)
+    check_names(info, strings.decode("utf-8") if strings is not None else None,
+                names, contract, bundle, problems)
+    if strings is None:
+        problems.append(f"{bundle}: no {strings_name}")
+    executable = "Contents/MacOS/" + info.get("CFBundleExecutable", "")
+    if names["appName"].encode() not in files.get(executable, b""):
+        problems.append(f"{bundle}: {executable} does not contain {names['appName']!r} (not the SmartRoom build)")
+    allowed_runs = {bundle, "/Volumes/Omarchy"}
+    for name, data in files.items():
+        if name in ("Contents/Info.plist", strings_name):
+            continue
+        for run in runs(data):
+            for part in run.split("\n"):
+                for match in BARE.finditer(part):
+                    rest = part[match.start():]
+                    if (part.strip() in allowed_runs or rest.startswith("Aurora/Recovery/")
+                            or "# Aurora Recovery command" in part):
+                        continue
+                    problems.append(f"{bundle}/{name}: {part.strip()[:160]!r}")
+                    break
+    return problems, f"{bundle}: {len(files)} files; CFBundleName {info.get('CFBundleName')!r}"
+
+
+def main():
+    if len(sys.argv) < 2 or sys.argv[1] not in ("source", "app"):
+        print(__doc__.strip(), file=sys.stderr)
+        return 2
+    if sys.argv[1] == "source":
+        problems, summary = source(sys.argv[2] if len(sys.argv) > 2 else ROOT)
+    else:
+        if len(sys.argv) != 3:
+            print(__doc__.strip(), file=sys.stderr)
+            return 2
+        problems, summary = app(sys.argv[2])
+    if problems:
+        print(f"recovery-branding {sys.argv[1]}: {len(problems)} place(s) still say Omarchy/Aurora or lack the brand:")
+        for problem in problems:
+            print("  " + problem)
+        return 1
+    print(f"no user-visible Omarchy: {summary}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

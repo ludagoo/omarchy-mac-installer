@@ -153,7 +153,7 @@ Install and retry add:
 | `OMARCHY_ENGINE_BINDING_DIGEST` | the identity's `binding_digest` |
 | `OMARCHY_ENGINE_PLAN_DIGEST` | the plan record's `plan_digest` (64 hex digits, no prefix) |
 | `OMARCHY_MACHINE_OWNER` | `--owner` |
-| `DISTRO`, `OMARCHY_INSTALLER_NAME`, `DISTRO_DOCS` | `Omarchy`, `Omarchy Installer` (`INSTALLER_APP_NAME`), `https://omarchy.org/manual/`, as the app sets them |
+| `DISTRO`, `OMARCHY_INSTALLER_NAME`, `DISTRO_DOCS` | the image's OS name (`SmartRoom Firmware`), that name + ` Installer` (as the SmartRoom Recovery app calls itself; the Engine uses both only in the stub's fallback Terminal step 2 and its messages), `https://omarchy.org/manual/`. The app sets `Omarchy` and `INSTALLER_APP_NAME`; a stock image still gets those. |
 | `OMARCHY_RESTORE_IMAGE`, `OMARCHY_RESTORE_IMAGE_REQUIREMENT` | `package/omarchy-restore-image` and its requirement |
 | `OMARCHY_FULL_READBACK` | `1` only with `--full-readback` (the app never sets it) |
 

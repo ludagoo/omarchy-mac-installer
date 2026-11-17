@@ -86,6 +86,13 @@ if [[ -e $m/etc/omarchy-mac-boot/headless ]]; then
   fi
   check "smartroom-boot-os and aurora-bless installed" test -x "$m/usr/bin/smartroom-boot-os" -a -x "$m/usr/bin/aurora-bless"
   check "Limine entry says SmartRoom Firmware" grep -qx '/+SmartRoom Firmware' "$m/boot/efi/limine.conf"
+  # The Recovery app 1TR runs (esp/aurora/recovery, staged unchanged to the stub).
+  if out=$(python3 "$(dirname -- "${BASH_SOURCE[0]}")/recovery-branding" app "$work/x/esp/aurora/recovery" 2>&1); then
+    pass "Recovery app (1TR) shows SmartRoom Firmware, ${out#no user-visible Omarchy: }"
+  else
+    failed "Recovery app (1TR) is not the SmartRoom build or still shows Omarchy:"
+    sed 's/^/  /' <<<"$out" | head -n 40
+  fi
   check "ESP install.conf: encrypt=0" grep -qx 'encrypt=0' "$m/boot/efi/omarchy/install.conf"
   check "sshd enabled" test -L "$wants/sshd.service"
   check "SmartRoom first boot enabled" test -L "$wants/smartroomos-firstboot.service"

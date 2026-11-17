@@ -483,6 +483,12 @@ journal=$run/execution-journals/${binding#sha256:}.jsonl
 [[ -z $retry || -s $journal ]] || die "$run has no install journal to retry"
 os_meta=$(py meta "$pkg/installer_data.json")
 os_name=$(sed -n 1p <<<"$os_meta") esp_label=$(sed -n 2p <<<"$os_meta") recovery_gui=$(sed -n 3p <<<"$os_meta")
+# The image names itself to the person at the Mac: the Engine's DISTRO and the
+# Recovery setup's title are the image's OS name, as its Recovery app is named
+# ("SmartRoom Firmware Installer"; a stock image stays "Omarchy", app_name).
+# The Engine writes both into the stub's step2.sh, so only its title pattern.
+re='^[A-Za-z0-9 ._()-]{1,54}$'
+if [[ $os_name =~ $re ]]; then distro=$os_name installer_name="$os_name Installer"; else distro=Omarchy installer_name=$app_name; fi
 say "plan $plan_digest: $length bytes at offset $offset on $store for $os_name ($payload_name), install.conf encrypt=$encrypt lane=$lane"
 if (( ! yes )); then
   [[ -n $retry ]] || rm -f "$pkg/$payload_name"
@@ -497,8 +503,8 @@ say "3/3 engine $mode (journal $journal)"
 install_env=(OMARCHY_ENGINE_MODE="$mode" OMARCHY_ENGINE_REQUEST="$pkg/request.json"
   OMARCHY_ENGINE_IDENTITY="$pkg/identity.json" OMARCHY_ENGINE_METADATA="$pkg/installer_data.json"
   OMARCHY_ENGINE_PAYLOAD="$pkg/$payload_name" OMARCHY_ENGINE_BINDING_DIGEST="$binding"
-  OMARCHY_ENGINE_PLAN_DIGEST="$plan_digest" OMARCHY_MACHINE_OWNER="$owner" DISTRO=Omarchy
-  OMARCHY_INSTALLER_NAME="$app_name" DISTRO_DOCS=https://omarchy.org/manual/
+  OMARCHY_ENGINE_PLAN_DIGEST="$plan_digest" OMARCHY_MACHINE_OWNER="$owner" DISTRO="$distro"
+  OMARCHY_INSTALLER_NAME="$installer_name" DISTRO_DOCS=https://omarchy.org/manual/
   OMARCHY_RESTORE_IMAGE="$pkg/omarchy-restore-image" OMARCHY_RESTORE_IMAGE_REQUIREMENT="$requirement")
 if (( readback )); then install_env+=(OMARCHY_FULL_READBACK=1); fi
 caffeinate -i -s -w $$ </dev/null >/dev/null 2>&1 &
@@ -580,8 +586,8 @@ password=""
 echo "startup disk: $os_name ($stub_volume, volume group $stub_group), the default (not --nextonly)"
 
 if [[ $recovery_gui == omarchy-native-v1 ]]; then
-  step="The $app_name Recovery app opens (Finish setup). Enter $owner's macOS password and choose Install;
-     follow it to the end, then Restart."
+  step="$installer_name opens on its \"Finish setup\" screen. Enter $owner's macOS password and choose
+     Install; follow it to the end, then Restart."
 else
   step="Recovery opens a Terminal running the second step. Answer y, enter $owner's password when asked;
      it restarts when done."

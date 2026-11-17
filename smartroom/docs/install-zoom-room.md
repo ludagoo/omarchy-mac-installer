@@ -170,9 +170,10 @@ the Mac:
    Arrow keys to "SmartRoom Firmware", Tab to Continue, Control+Option+Space.
 4. If Recovery asks for a user or volume to recover: macOS, then the owner,
    and the owner's password.
-5. Omarchy's Recovery app ("Finish setup") asks for the owner's password,
-   then Install, then Restart. (VoiceOver: Control+Option+arrows to move,
-   Control+Option+Space to press.)
+5. SmartRoom Firmware Installer opens on "Finish setup" (the SmartRoom
+   Firmware banner; screenshots in [recovery-app.md](recovery-app.md)). It
+   asks for the owner's password, then Install, then Restart. (VoiceOver:
+   Control+Option+arrows to move, Control+Option+Space to press.)
 6. The Mac starts SmartRoom Firmware. First boot sets up the room and
    restarts once by itself.
 
