@@ -45,6 +45,12 @@ done < <(cd "$fw/overlay" && find . -mindepth 1 \( -type f -o -type l \) -print0
 install -d -m 0755 /etc/smartroomos
 : >/etc/smartroomos/omarchy-base
 install -D -m 0755 "$fw/studio-install/firstboot.sh" /usr/local/sbin/smartroomos-firstboot
+# Omarchy's first boot (keyring, deferred hardware setup, the boot rebuild)
+# finishes before ours starts: both make the pacman keyring, and ours ends in
+# a reboot.
+install -d -m 0755 /etc/systemd/system/smartroomos-firstboot.service.d
+printf '[Unit]\nAfter=omarchy-mac-first-boot.service omarchy-provision-hardware.service\n' \
+  >/etc/systemd/system/smartroomos-firstboot.service.d/10-after-omarchy-first-boot.conf
 install -D -m 0644 "$fw/builder/image/rootfs/etc/NetworkManager/conf.d/smartroomos-dhcp-client-id.conf" \
   /etc/NetworkManager/conf.d/smartroomos-dhcp-client-id.conf
 
