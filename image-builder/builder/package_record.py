@@ -57,7 +57,12 @@ def main():
     parser.add_argument('--order', required=True)
     parser.add_argument('--cache', type=Path, required=True)
     parser.add_argument('--candidates', type=Path, required=True)
+    # SmartRoom fork: a local repository whose archives sit beside its
+    # database (like the set's), and set packages the image leaves out.
+    parser.add_argument('--local-repository', default='')
+    parser.add_argument('--not-installed', default='')
     args = parser.parse_args()
+    local = {'omarchy-candidates'} | ({args.local_repository} if args.local_repository else set())
 
     order = args.order.split(',')
     databases = {name: sync_entries(args.repositories / name / f'{name}.db') for name in order}
@@ -79,20 +84,20 @@ def main():
             if listed is None:
                 continue
             filename, expected = listed
-            places = [args.repositories / repository / filename] if repository == 'omarchy-candidates' \
+            places = [args.repositories / repository / filename] if repository in local \
                 else [args.cache / filename]
             if any(digest_of(place) == expected for place in places):
                 found = (repository, filename, expected)
                 break
         if found is None:
             fail(f'{name} {version} does not trace to a pinned database and archive')
-        if name in candidates:
+        if name in candidates and not (args.local_repository and found[0] == args.local_repository):
             candidate = candidates[name]
             if found != ('omarchy-candidates', candidate['filename'], candidate['sha256']) \
                     or version != candidate['version']:
                 fail(f'{name} {version} is not the candidate set\'s archive')
         lines.append(f'{name}|{version}|{found[0]}|{found[1]}|{found[2]}')
-    missing = sorted(set(candidates) - {line.split('|', 1)[0] for line in lines})
+    missing = sorted(set(candidates) - {line.split('|', 1)[0] for line in lines} - set(filter(None, args.not_installed.split(','))))
     if missing:
         fail('candidate packages are not installed: ' + ', '.join(missing))
     print('\n'.join(lines))

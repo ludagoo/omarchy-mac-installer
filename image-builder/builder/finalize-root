@@ -20,8 +20,12 @@ usage() {
 }
 
 root=""
+# SmartRoom fork: --headless (the --smartroom image) has no Plymouth splash and
+# no display manager, so neither is configured.
+headless=0
 while (($#)); do
   case $1 in
+    --headless) headless=1 ;;
     --root)
       (($# > 1)) || usage
       root=$2
@@ -195,8 +199,8 @@ scrub_machine_identity() {
 }
 
 configure_grub_defaults
-configure_splash
-configure_login
+((headless)) || configure_splash
+((headless)) || configure_login
 configure_identity
 configure_locale
 configure_keyboard

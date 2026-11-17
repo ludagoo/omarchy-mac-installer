@@ -68,7 +68,7 @@ TOOLCHAIN=(pacman arch-install-scripts btrfs-progs e2fsprogs dosfstools libarchi
 
 usage() {
   cat <<'USAGE'
-Usage: bin/build-mac-image --inputs FILE [--candidates DIR] [--cache DIR] [--lab-access DIR] [--recovery-app DIR] [--dry-run] OUT
+Usage: bin/build-mac-image --inputs FILE [--candidates DIR] [--cache DIR] [--lab-access DIR] [--recovery-app DIR] [--smartroom DIR] [--dry-run] OUT
 
 Builds the Apple Silicon image for the candidate set in DIR from the inputs
 record FILE (bin/mac-image-inputs resolve) into the empty or missing directory
@@ -93,6 +93,15 @@ grants that user key-only SSH, passwordless sudo and polkit
 over SSH after the first boot. IMAGE and PROVENANCE record profile=lab, and the
 inspection holds the image to exactly that overlay; any other image refuses it.
 A lab image is built from a candidate set only, never from a channel record.
+
+--smartroom DIR (SmartRoom fork only, see CARRY.md) builds the headless
+SmartRoom Firmware image from the same channel record: no omarchy runtime,
+settings or desktop. DIR holds repo/ (a pacman repository "smartroom" signed by
+the key in key.asc, fingerprint in key.fpr: our omarchy-mac-boot and
+smartroom-omarchy-helpers), packages (what the image installs instead of the
+runtime's lists), apple-drop (names left out of the runtime's Apple list) and
+setup/ (setup/run is run in the image root before the initramfs is built). The
+boot chain, first boot and @factory are the stock image's.
 
 Needs docker, curl, gpg, python3, bsdtar and sha256sum on the host. As root or
 with passwordless sudo, it hides its loop devices from desktop automounters
@@ -213,11 +222,11 @@ import_channel_set() {
 }
 
 host_main() {
-  local inputs="" candidates="" cache="" lab_access="" recovery_app="" out commit status clean=true started=$SECONDS dry_run=false
-  local cache_mounts=() lab_mounts=() recovery_mounts=() kind recovery_digest
+  local inputs="" candidates="" cache="" lab_access="" recovery_app="" smartroom="" out commit status clean=true started=$SECONDS dry_run=false
+  local cache_mounts=() lab_mounts=() recovery_mounts=() smartroom_mounts=() kind recovery_digest
   while (($#)); do
     case $1 in
-      --inputs|--candidates|--cache|--lab-access|--recovery-app)
+      --inputs|--candidates|--cache|--lab-access|--recovery-app|--smartroom)
         (($# > 1)) && [[ -n $2 ]] || usage_error "$1 requires a value"
         case $1 in
           --inputs) inputs=$2 ;;
@@ -225,6 +234,7 @@ host_main() {
           --cache) cache=$2 ;;
           --lab-access) lab_access=$2 ;;
           --recovery-app) recovery_app=$2 ;;
+          --smartroom) smartroom=$2 ;;
         esac
         shift 2
         ;;
@@ -258,6 +268,13 @@ host_main() {
     python3 "$ROOT/builder/lab_access.py" validate "$lab_access" >/dev/null || fail "--lab-access is not lab access"
     lab_access=$(cd -- "$lab_access" && pwd)
     lab_mounts=(-v "$lab_access:/lab-access:ro")
+  fi
+  if [[ -n $smartroom ]]; then
+    [[ -z $lab_access ]] || fail "--smartroom and --lab-access are separate images"
+    [[ -f $smartroom/repo/smartroom.db && -f $smartroom/key.asc && -f $smartroom/key.fpr && -f $smartroom/packages &&
+      -f $smartroom/apple-drop && -x $smartroom/setup/run ]] || fail "--smartroom names no SmartRoom build directory"
+    smartroom=$(cd -- "$smartroom" && pwd)
+    smartroom_mounts=(-v "$smartroom:/smartroom:ro")
   fi
 
   host_work=$(mktemp -d)
@@ -295,6 +312,7 @@ host_main() {
   if $dry_run; then
     echo "Would build the Apple Silicon image of $(sed -n 's/^set=//p' "$host_work/import.txt") from $inputs into $out"
     [[ -z $lab_access ]] || { echo "as a lab test image:"; python3 "$ROOT/builder/lab_access.py" validate "$lab_access"; }
+    [[ -z $smartroom ]] || echo "as the SmartRoom Firmware image from $smartroom"
     cat "$host_work/import.txt"
     return 0
   fi
@@ -334,7 +352,7 @@ host_main() {
   # interruption reaches the traps above at once.
   docker run --rm --cidfile "$host_work/cid" --privileged --platform linux/arm64 \
     -v "$ROOT:/src:ro" -v "$inputs:/inputs:ro" -v "$host_work/candidates:/candidates:ro" \
-    -v "$host_work/dbs:/dbs:ro" -v "$out:/out" -v /work "${cache_mounts[@]}" "${lab_mounts[@]}" "${recovery_mounts[@]}" \
+    -v "$host_work/dbs:/dbs:ro" -v "$out:/out" -v /work "${cache_mounts[@]}" "${lab_mounts[@]}" "${recovery_mounts[@]}" "${smartroom_mounts[@]}" \
     -e MAC_IMAGE_BUILDER_COMMIT="$commit" \
     -e MAC_IMAGE_BUILDER_CLEAN="$clean" \
     -e MAC_IMAGE_BUILDER_IMAGE="$(docker image inspect --format '{{.Id}}' "$host_image")" \
@@ -361,6 +379,9 @@ lane=""
 test_image_pin=""
 profile=release
 lab_access_dir=/lab-access
+smartroom_dir=/smartroom
+# The OS name the Mac's startup picker, the stub volume and the Limine entry show.
+OS_NAME=Omarchy
 lab_access_sha256=""
 package_set_digest=""
 built=""
@@ -440,6 +461,7 @@ repository_order=(asahi-alarm core extra alarm aur omarchy)
 # candidate set: name, pinned sha256 (none for the set) and remote server.
 repositories() {
   local repository
+  [[ $profile != smartroom ]] || printf 'smartroom - -\n'
   printf 'omarchy-candidates - -\n'
   for repository in "${repository_order[@]}"; do
     case $repository in
@@ -510,6 +532,8 @@ prepare_toolchain() {
   # candidate archive's signature again as it installs it. The image never
   # carries this key, and a channel build never trusts it.
   trust_key "$ROOT/builder/keys/omarchy-repository.gpg" "$OMARCHY_REPOSITORY_KEY" "the Omarchy repository key"
+  [[ $profile != smartroom ]] ||
+    trust_key "$smartroom_dir/key.asc" "$(<"$smartroom_dir/key.fpr")" "the SmartRoom package key"
   [[ $(set_kind) == channel ]] ||
     trust_key "$ROOT/builder/candidate-trust/public.asc" "$CANDIDATE_KEY" "the candidate test key"
 }
@@ -530,7 +554,7 @@ prepare_repositories() {
   local name sha server archive archives=()
   mkdir -p "$repos/omarchy-candidates" "$repos/omarchy-aarch64"
   while read -r name sha server; do
-    [[ $name != omarchy-candidates ]] || continue
+    [[ $name != omarchy-candidates && $name != smartroom ]] || continue
     mkdir -p "$repos/$name"
     verify_database "/dbs/$name.db" "$sha"
     cp "/dbs/$name.db" "$repos/$name/$name.db"
@@ -544,6 +568,12 @@ prepare_repositories() {
   rm -f "$repos/omarchy-candidates/omarchy-candidates.db"
   cp "$repos/omarchy-candidates/omarchy-candidates.db.tar.gz" "$repos/omarchy-candidates/omarchy-candidates.db"
   bsdtar -czf "$repos/omarchy-aarch64/omarchy-aarch64.db" --files-from /dev/null
+  if [[ $profile == smartroom ]]; then
+    mkdir -p "$repos/smartroom"
+    cp -L "$smartroom_dir"/repo/* "$repos/smartroom/"
+    bsdtar -xOf "$repos/smartroom/smartroom.db" '*/desc' | awk '/^%NAME%$/ { getline; print }' >"$work/smartroom-names"
+    [[ -s $work/smartroom-names ]] || fail "the SmartRoom repository is empty"
+  fi
 }
 
 # The pacman configuration a transaction installs from: the candidate set
@@ -625,7 +655,7 @@ place_databases() {
 verify_synced_databases() {
   local name sha server
   while read -r name sha server; do
-    if [[ $name == omarchy-candidates ]]; then
+    if [[ $name == omarchy-candidates || $name == smartroom ]]; then
       cmp -s "$repos/$name/$name.db" "$target/var/lib/pacman/sync/$name.db" ||
         fail "the candidate database changed during the build"
     else
@@ -784,12 +814,19 @@ read_apple_list() {
     fail "the runtime ships no Apple package list (omarchy-aarch64-apple.packages, omarchy-apple-silicon.packages or omarchy-apple.packages)"
   text=$(bsdtar -xOf "$archive" "$list") || fail "could not read the runtime's ${list##*/}"
   mapfile -t apple_names < <(awk 'NF && $1 !~ /^#/ { print $1 }' <<<"$text")
+  if [[ $profile == smartroom ]]; then
+    mapfile -t apple_names < <(printf '%s\n' "${apple_names[@]}" | grep -Fvx -f <(awk 'NF && $1 !~ /^#/ { print $1 }' "$smartroom_dir/apple-drop"))
+  fi
   ((${#apple_names[@]})) || fail "the runtime's ${list##*/} names no package"
 }
 
 # What omarchy-pkg-defaults composes before the Apple list: the base list, then
 # the aarch64 additions of a runtime that ships them.
 runtime_lists() {
+  if [[ $profile == smartroom ]]; then
+    awk 'NF && $1 !~ /^#/ { print $1 }' "$smartroom_dir/packages"
+    return 0
+  fi
   runtime_list base
   if bsdtar -tf "$candidates/$(candidate_archive omarchy)" usr/share/omarchy/install/omarchy-aarch64.packages \
     >/dev/null 2>&1; then
@@ -800,6 +837,10 @@ runtime_lists() {
 qualified() {
   local name package replacement
   for name in "$@"; do
+    if [[ $profile == smartroom ]] && grep -Fxq "$name" "$work/smartroom-names"; then
+      printf 'smartroom/%s\n' "$name"
+      continue
+    fi
     replacement=$name
     case $name in
       uboot-asahi) replacement=uboot-aurora ;;
@@ -852,11 +893,12 @@ precheck_transaction() {
   done
   available_base
   resolved=$(target_pacman -Sp --print-format '%r %n %v' "${BOOTSTRAP[@]}" "${PLATFORM_PACKAGES[@]}" \
-    "$(qualified omarchy)" "$(qualified omarchy-settings)" "${base_names[@]}" $(qualified "${APPLE_AUDIO[@]}") \
+    $(runtime_roles) "${base_names[@]}" $(qualified "${APPLE_AUDIO[@]}") \
     $(qualified "${apple_names[@]}" $(candidate_names boot) $(candidate_names support)) 2>>"$logs/precheck.log") ||
     fail "the package set does not resolve against the pinned databases (logs/precheck.log)"
   printf '%s\n' "$resolved" >"$logs/precheck.log"
   while read -r name; do
+    candidate_installed "$name" || continue
     grep -Eq "^omarchy-candidates $name " <<<"$resolved" || fail "$name does not resolve from the candidate set"
   done < <(jq -r '.packages[].name' "$candidates/import.json")
   for refused in $(jq -r '.refused_packages[]' "$ROOT/builder/candidate-trust/policy.json"); do
@@ -864,9 +906,26 @@ precheck_transaction() {
   done
 }
 
+# The runtime and settings packages the image installs: none in the SmartRoom
+# profile, which has no desktop (smartroom-omarchy-helpers carries the few
+# runtime files the boot package reads).
+runtime_roles() {
+  [[ $profile == smartroom ]] || qualified omarchy omarchy-settings
+}
+
+# Whether the image installs the candidate set's package NAME: the SmartRoom
+# profile leaves out the runtime, the settings, what apple-drop names and what
+# its own repository replaces.
+candidate_installed() {
+  [[ $profile == smartroom ]] || return 0
+  case $1 in omarchy | omarchy-settings | omarchy-dev | omarchy-settings-dev) return 1 ;; esac
+  ! grep -Fxq "$1" "$work/smartroom-names" &&
+    ! awk 'NF && $1 !~ /^#/ { print $1 }' "$smartroom_dir/apple-drop" | grep -Fxq "$1"
+}
+
 install_settings() {
   mount_api
-  target_pacman -S "${BOOTSTRAP[@]}" "$(qualified omarchy-settings)" >>"$logs/install.log" 2>&1 ||
+  target_pacman -S "${BOOTSTRAP[@]}" $([[ $profile == smartroom ]] || qualified omarchy-settings) >>"$logs/install.log" 2>&1 ||
     fail "could not install the base system and omarchy-settings (logs/install.log)"
   unmount_api
 }
@@ -876,8 +935,8 @@ install_settings() {
 image_profile() {
   local candidate_only
   candidate_only=$(jq -r '.candidate_only' "$candidates/import.json") || return 1
-  if [[ $profile == lab ]]; then
-    echo lab
+  if [[ $profile == lab || $profile == smartroom ]]; then
+    echo "$profile"
   elif [[ $candidate_only == true ]]; then
     echo test
   else
@@ -902,7 +961,7 @@ write_image_target() {
     # A channel image names its set and the channel database it came from.
     set_name=$(field channel_set)
     source_commit=$(field omarchy_db_sha256)
-    [[ $set_name =~ ^[A-Za-z0-9._-]+$ && $source_commit =~ ^[0-9a-f]{64}$ && $image_profile == release ]] ||
+    [[ $set_name =~ ^[A-Za-z0-9._-]+$ && $source_commit =~ ^[0-9a-f]{64}$ && $image_profile =~ ^(release|smartroom)$ ]] ||
       fail "the inputs name no channel set and database for the image target"
     printf -v set_lines 'channel_set=%s\nchannel_db_sha256=%s' "$set_name" "$source_commit"
   else
@@ -985,7 +1044,7 @@ install_runtime() {
   # cannot replace it later without answering a conflict prompt.
   mapfile -t graphics < <(qualified mesa-aurora vulkan-aurora)
   mount_api
-  target_pacman -S "$(qualified omarchy)" "${base_names[@]}" "${graphics[@]}" >>"$logs/install.log" 2>&1 ||
+  target_pacman -S $([[ $profile == smartroom ]] || qualified omarchy) "${base_names[@]}" "${graphics[@]}" >>"$logs/install.log" 2>&1 ||
     fail "could not install the runtime (logs/install.log)"
   unmount_api
 }
@@ -998,6 +1057,7 @@ install_apple_set() {
   unmount_api
   installed=$(pacman --dbpath "$target/var/lib/pacman" -Q)
   while read -r name version; do
+    candidate_installed "$name" || continue
     grep -Fxq "$name $version" <<<"$installed" || fail "$name $version from the candidate set is not installed"
   done < <(jq -r '.packages[] | "\(.name) \(.version)"' "$candidates/import.json")
   ! grep -Eq '^linux-asahi ' <<<"$installed" || fail "linux-asahi is installed beside $KERNEL"
@@ -1092,11 +1152,15 @@ run_system_setup() {
   rm -f "$target/etc/resolv.conf"
   cp /etc/resolv.conf "$target/etc/resolv.conf" || fail "could not lend the builder's resolver to the image"
   chmod 0644 "$target/etc/resolv.conf"
+  if [[ $profile == smartroom ]]; then
+    headless_system_setup
+  else
   isolated_chroot "$target" env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/bin HOME=/root TERM=dumb \
     LANG=C.UTF-8 OMARCHY_MAC_IMAGE_BUILD=1 OMARCHY_PATH=/usr/share/omarchy \
     /usr/bin/omarchy-apply-system --defer-provisioning --first-install >>"$logs/system-setup.log" 2>&1 ||
     { cp "$target/var/log/omarchy-install.log" "$logs/" 2>/dev/null || true
       fail "the runtime's system setup stopped (logs/system-setup.log, logs/omarchy-install.log)"; }
+  fi
   cp "$target/var/log/omarchy-install.log" "$logs/" 2>/dev/null || true
   unmount_api
   rm -f "$target/etc/resolv.conf"
@@ -1109,6 +1173,27 @@ run_system_setup() {
   else
     hardware_setup=build
   fi
+}
+
+# The SmartRoom profile's system setup, in place of omarchy-apply-system: only
+# the steps of it that the boot chain needs, each the runtime's own code from
+# smartroom-omarchy-helpers: snapper's root configuration
+# (install/config/snapper.sh), then the deferral of the Mac's hardware setup to
+# its first boot (install/helpers/image-target.sh, as omarchy_image_defer_hardware
+# does it) with the one leaf a Mac needs there, platform-setup.sh, which runs
+# omarchy-mac-boot's setup-boot on the real hardware.
+headless_system_setup() {
+  isolated_chroot "$target" env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/bin HOME=/root TERM=dumb \
+    LANG=C.UTF-8 OMARCHY_MAC_IMAGE_BUILD=1 OMARCHY_PATH=/usr/share/omarchy OMARCHY_INSTALL=/usr/share/omarchy/install \
+    /bin/bash -euo pipefail -c '
+      source "$OMARCHY_INSTALL/config/snapper.sh"
+      source "$OMARCHY_INSTALL/helpers/image-target.sh"
+      omarchy_image_init
+      omarchy_image_write_queue install/hardware/platform-setup.sh
+      install -d -m 0755 "$omarchy_image_systemd_dir/multi-user.target.wants"
+      install -m 0644 "$OMARCHY_INSTALL/provisioning/$omarchy_image_unit" "$omarchy_image_systemd_dir/$omarchy_image_unit"
+      ln -sfn "/etc/systemd/system/$omarchy_image_unit" "$omarchy_image_systemd_dir/multi-user.target.wants/$omarchy_image_unit"
+    ' >>"$logs/system-setup.log" 2>&1 || fail "the headless system setup stopped (logs/system-setup.log)"
 }
 
 apply_presets() {
@@ -1130,7 +1215,7 @@ apply_presets() {
 }
 
 finalize_root() {
-  bash "$ROOT/builder/finalize-root" --root "$target" >>"$logs/finalize.log" 2>&1 ||
+  bash "$ROOT/builder/finalize-root" --root "$target" $([[ $profile != smartroom ]] || echo --headless) >>"$logs/finalize.log" 2>&1 ||
     fail "could not finalize the image root (logs/finalize.log)"
 }
 
@@ -1188,6 +1273,8 @@ stage_node() {
 # runtime's user setup unpacks offline, and the unit, armed. Owner provisioning
 # exits 0 without creating anyone unless pending is armed.
 stage_owner_provisioning() {
+  # A headless image has no owner at a display (omarchy-mac-boot's headless flag).
+  [[ $profile != smartroom ]] || return 0
   local unit=$target/usr/share/omarchy/install/provisioning/omarchy-provision-owner.service
   node_pin_file="$ROOT/builder/node.pin"
   [[ -f $unit && -x $target/usr/bin/omarchy-provision-owner ]] ||
@@ -1227,6 +1314,22 @@ apply_lab_access() {
     fail "could not write the lab access overlay"
   isolated_chroot "$target" visudo -cf /etc/sudoers.d/omarchy-lab >>"$logs/lab-access.log" 2>&1 ||
     fail "the lab sudoers rule does not validate (logs/lab-access.log)"
+}
+
+# The SmartRoom profile's own layer (setup/run from --smartroom), in the image
+# root after the finalizer and before the initramfs, the Limine activation and
+# @factory: it marks the image headless for omarchy-mac-boot's first boot and
+# names its Limine entry, then installs the room's own files.
+apply_smartroom() {
+  [[ $profile == smartroom ]] || return 0
+  install -d -m 0755 "$target/etc/omarchy-mac-boot"
+  : >"$target/etc/omarchy-mac-boot/headless"
+  printf 'TARGET_OS_NAME="%s"\n' "$OS_NAME" >"$target/etc/default/limine"
+  rm -rf "$target/var/tmp/smartroom-setup"
+  cp -a "$smartroom_dir/setup" "$target/var/tmp/smartroom-setup"
+  isolated_chroot "$target" env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/bin HOME=/root TERM=dumb LANG=C.UTF-8 \
+    /var/tmp/smartroom-setup/run >>"$logs/smartroom-setup.log" 2>&1 || fail "the SmartRoom setup stopped (logs/smartroom-setup.log)"
+  rm -rf "$target/var/tmp/smartroom-setup"
 }
 
 sealed_body() {
@@ -1292,6 +1395,7 @@ configure_image() {
   stage_owner_provisioning
   forget_private_pacman
   apply_lab_access
+  apply_smartroom
 
   isolated_chroot "$target" mkinitcpio -P >"$logs/mkinitcpio.log" 2>&1 || fail "mkinitcpio failed (logs/mkinitcpio.log)"
   [[ -s $target/boot/vmlinuz-$KERNEL && -s $target/boot/initramfs-$KERNEL.img ]] ||
@@ -1529,10 +1633,21 @@ verify_uki_cmdline() {
 
 # Every installed package, traced to the pinned database that lists it and
 # the archive bytes that database names, from the build's package cache.
+# SmartRoom: its repository's archives sit beside their database, like the
+# set's, and the set's packages the image leaves out are not installed.
+smartroom_record_args() {
+  [[ $profile == smartroom ]] || return 0
+  local name left_out=()
+  while read -r name; do
+    candidate_installed "$name" || left_out+=("$name")
+  done < <(jq -r '.packages[].name' "$candidates/import.json")
+  printf -- '--local-repository smartroom --not-installed %s\n' "$(IFS=,; echo "${left_out[*]}")"
+}
+
 record_packages() {
   python3 "$ROOT/builder/package_record.py" --root "$target" --repositories "$repos" \
     --order "$(repositories | awk '{ print $1 }' | paste -sd, -)" --cache /cache \
-    --candidates "$candidates/import.json" >"$work/packages" 2>>"$logs/packages.log" ||
+    --candidates "$candidates/import.json" $(smartroom_record_args) >"$work/packages" 2>>"$logs/packages.log" ||
     fail "the installed packages do not trace to the pinned databases (logs/packages.log)"
   # A channel image also holds every package it took from the channel itself,
   # not only the set, to the pinned database and the Omarchy package key.
@@ -1615,15 +1730,16 @@ payload_name() {
   date=$(field resolved_at | cut -c1-10 | tr - .)
   # A lab image's payload says so in its name (mac-image-check PAYLOAD_NAME).
   [[ $profile == release ]] || lane_name=$lane-$profile
+  [[ $profile != smartroom ]] || { printf 'smartroom-firmware-%s-aarch64-apple-silicon-mac-%s-os-package.zip\n' "$date" "$lane"; return 0; }
   printf 'omarchy-%s-aarch64-apple-silicon-mac-%s-os-package.zip\n' "$date" "${lane_name:-$lane}"
 }
 
 write_installer_data() {
   jq -S -n --arg package "$1" --argjson esp "$ESP_SIZE" --argjson boot "$BOOT_SIZE" --argjson root "$ROOT_SIZE" \
-    --arg volume_id "$ESP_VOLUME_ID" \
+    --arg volume_id "$ESP_VOLUME_ID" --arg os_name "$OS_NAME" \
     --arg recovery_app_manifest "$(field recovery_app_manifest_sha256)" \
     --args '{os_list: [{
-      name: "Omarchy", default_os_name: "Omarchy", omarchy_target: "apple-silicon-full-os",
+      name: $os_name, default_os_name: $os_name, omarchy_target: "apple-silicon-full-os",
       boot_object: "m1n1.bin", next_object: "m1n1/boot.bin", package: $package, icon: "omarchy-volume.icns",
       supported_fw: $ARGS.positional,
       partitions: [
@@ -1755,6 +1871,10 @@ container_main() {
     [[ $lane == edge ]] || fail "a lab image is built for the edge lane only"
     profile=lab
   fi
+  if [[ -d $smartroom_dir ]]; then
+    profile=smartroom
+    OS_NAME="SmartRoom Firmware"
+  fi
   [[ -d /out && -z $(ls -A /out) ]] || fail "/out is not an empty directory"
   [[ $(sha256_of "$ROOT/builder/omarchy-volume.icns") == "$ICON_SHA256" ]] || fail "the volume icon changed"
   [[ -f "$candidates/import.json" ]] || fail "the candidate set was not imported"
@@ -1794,24 +1914,33 @@ build_payload() {
   configure_image
   step "sealing root.img and boot.img"
   seal_images
+  if [[ $profile == smartroom ]]; then
+    step "skipping the Omarchy release inspection (it holds the desktop runtime; smartroom/desk-check checks the boot chain)"
+  else
   step "inspecting the images"
   python3 "$ROOT/bin/mac-image-check" image "$lane" "$work/final/root.img" "$work/final/boot.img" "$work/final/esp" \
     --candidates "$candidates" --report /out/INSPECTION --profile "$profile" ||
     fail "the images do not pass inspection (INSPECTION)"
+  fi
   step "packaging"
   zip=/out/$(payload_name)
   install -m 0444 "$ROOT/builder/omarchy-volume.icns" "$work/final/omarchy-volume.icns"
   mkdir -p "$work/final/esp/omarchy"
+  # SmartRoom: encryption off unless an installer writes encrypt=1 here
+  # (omarchy-mac-boot's own switch; first boot consumes the file).
+  [[ $profile != smartroom ]] || printf 'format=1\nencrypt=0\n' >"$work/final/esp/omarchy/install.conf"
   find "$work/final" -exec touch -h -d "$(field resolved_at)" {} +
   (cd "$work/final" && bsdtar --format zip -cf "$zip" esp boot.img root.img omarchy-volume.icns)
   write_installer_data "${zip##*/}" /out/installer_data.json
-  python3 "$ROOT/bin/mac-image-check" payload "$lane" "$zip" /out/installer_data.json --profile "$profile" ||
+  python3 "$ROOT/bin/mac-image-check" payload "$lane" "$zip" /out/installer_data.json --profile "$profile" --os-name "$OS_NAME" ||
     fail "the payload does not pass the layout check"
   write_provenance "$zip" >/out/PROVENANCE
   write_image >/out/IMAGE
   cp /inputs /out/inputs
+  if [[ $profile != smartroom ]]; then
   python3 "$ROOT/bin/mac-image-check" descriptor "$lane" /out || fail "IMAGE does not pass the descriptor check"
   python3 "$ROOT/bin/mac-image-check" provenance "$lane" /out || fail "PROVENANCE does not pass the provenance check"
+  fi
   step "done: ${zip##*/} is $(stat -c %s "$zip") bytes, root.img $(stat -c %s "$work/final/root.img") bytes"
 }
 

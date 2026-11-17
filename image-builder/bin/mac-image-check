@@ -93,10 +93,11 @@ REQUIRED_MEMBERS = {
 }
 # A lab image's payload says so in its name (-lab-), so it never passes for a release payload.
 PAYLOAD_NAME = re.compile(
-    r"^omarchy-\d{4}\.\d{2}\.\d{2}-aarch64-apple-silicon-mac-(edge|rc|stable)(-lab)?-os-package\.zip$"
+    r"^(?:omarchy|smartroom-firmware)-\d{4}\.\d{2}\.\d{2}-aarch64-apple-silicon-mac-(edge|rc|stable)(-lab)?-os-package\.zip$"
 )
 LANES = ("edge", "rc", "stable")
-PROFILES = ("release", "lab")
+# smartroom: the SmartRoom fork's headless image (--smartroom), payload checks only.
+PROFILES = ("release", "lab", "smartroom")
 # The only lane a lab image may be built for.
 LAB_LANE = "edge"
 IMAGE_LINKS = {
@@ -143,7 +144,7 @@ def require(condition: bool, message: str) -> None:
         raise CheckError(message)
 
 
-def expected_metadata(package: str, native_recovery: bool = False) -> dict:
+def expected_metadata(package: str, native_recovery: bool = False, os_name: str = "Omarchy") -> dict:
     """The one Omarchy target every Mac installs: no board restriction (the
     catalog and the engine refuse the Macs it does not support), and every
     Mac's OS firmware, of which the engine's per-device table picks each
@@ -153,9 +154,9 @@ def expected_metadata(package: str, native_recovery: bool = False) -> dict:
             {
                 **({"recovery_gui": "omarchy-native-v1"} if native_recovery else {}),
                 "boot_object": "m1n1.bin",
-                "default_os_name": "Omarchy",
+                "default_os_name": os_name,
                 "icon": ICON,
-                "name": "Omarchy",
+                "name": os_name,
                 "next_object": "m1n1/boot.bin",
                 "omarchy_target": "apple-silicon-full-os",
                 "package": package,
@@ -227,13 +228,15 @@ def check_plaintext_root(header: bytes, where: str) -> None:
 
 
 def check_payload(lane: str, package: Path, installer_data: Path, profile: str = "release",
-                  recovery_digest: str | None = None) -> dict[str, str]:
+                  recovery_digest: str | None = None, os_name: str = "Omarchy") -> dict[str, str]:
     check_profile(lane, profile)
     name = package.name
     match = PAYLOAD_NAME.fullmatch(name)
     require(match is not None and match.group(1) == lane, f"{name} is not a {lane} mac image payload name")
     require((match.group(2) == "-lab") == (profile == "lab"),
             f"{name} {'does not name' if profile == 'lab' else 'names'} a lab image")
+    require(name.startswith("smartroom-firmware-") == (profile == "smartroom"),
+            f"{name} does not match the {profile} profile")
     try:
         metadata = json.loads(installer_data.read_text(encoding="utf-8"))
     except (OSError, ValueError) as error:
@@ -244,7 +247,7 @@ def check_payload(lane: str, package: Path, installer_data: Path, profile: str =
     native_recovery = metadata.get("os_list", [{}])[0].get("recovery_gui") == "omarchy-native-v1"
     require(recovery_digest is None or native_recovery == bool(recovery_digest),
             "Recovery metadata does not match the pinned inputs")
-    require(metadata == expected_metadata(name, native_recovery), f"{installer_data} is not the installer_data for {name}")
+    require(metadata == expected_metadata(name, native_recovery, os_name), f"{installer_data} is not the installer_data for {name}")
 
     try:
         archive = zipfile.ZipFile(package)
@@ -284,7 +287,14 @@ def check_payload(lane: str, package: Path, installer_data: Path, profile: str =
         missing = sorted(required - set(members))
         require(not missing, "missing members: " + ", ".join(missing))
         require("esp/omarchy" in directories, "missing members: esp/omarchy/")
-        require(not any(name.startswith("esp/omarchy/") for name in members), "the image carries install.conf")
+        if profile == "smartroom":
+            # The SmartRoom image ships encryption off (omarchy-mac-boot's own switch).
+            esp_conf = [name for name in members if name.startswith("esp/omarchy/")]
+            require(esp_conf == ["esp/omarchy/install.conf"]
+                    and archive.read("esp/omarchy/install.conf") == b"format=1\nencrypt=0\n",
+                    "the SmartRoom image must carry exactly esp/omarchy/install.conf with encrypt=0")
+        else:
+            require(not any(name.startswith("esp/omarchy/") for name in members), "the image carries install.conf")
         require(".builder" not in {PurePosixPath(n).name for n in members}, "the ESP keeps the builder marker")
         for member in required:
             require(members[member].file_size > 0, f"{member} is empty")
@@ -1007,8 +1017,15 @@ def main(argv: list[str]) -> int:
     rest: list[str] = []
     options: dict[str, Path] = {}
     profile = "release"
+    os_name = "Omarchy"
     arguments = iter(argv[1:])
     for arg in arguments:
+        if arg == "--os-name":
+            os_name = next(arguments, "")
+            if not re.fullmatch(r"[A-Za-z0-9 ._()-]{1,64}", os_name):
+                print(USAGE, file=sys.stderr)
+                return 64
+            continue
         if arg in ("--candidates", "--report", "--profile"):
             value = next(arguments, None)
             if value is None or (arg == "--profile" and value not in PROFILES):
@@ -1037,7 +1054,7 @@ def main(argv: list[str]) -> int:
         return 64
     try:
         if mode == "payload":
-            check_payload(lane, Path(paths[0]), Path(paths[1]), profile)
+            check_payload(lane, Path(paths[0]), Path(paths[1]), profile, os_name=os_name)
         elif mode == "image":
             check_image(lane, Path(paths[0]), Path(paths[1]), Path(paths[2]), options["candidates"], options.get("report"),
                         profile)
