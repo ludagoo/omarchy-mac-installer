@@ -1,0 +1,163 @@
+#!/bin/bash
+# Install an Omarchy Mac payload (stock or SmartRoom Firmware) onto a Mac that
+# already has a working Asahi-style stub whose 1TR step is done, WITHOUT a new
+# stub and WITHOUT 1TR. macOS only, as root (sudo), over SSH is fine.
+#
+#   install-onto-existing-stub --zip PAYLOAD.zip --sha256 HEX \
+#     --esp diskNsA --esp-partuuid UUID --linux diskNsB [--encrypt 0|1] \
+#     [--full-readback] [--yes]
+#
+# What the stub's stage 1 m1n1 chainloads is "<ESP PARTUUID>;m1n1/boot.bin",
+# so everything after it lives on the ESP and the Linux partitions. This does
+# the Engine's own per-partition steps (osinstall.py partition_disk/install,
+# omarchy_asahi.py's board ESP layout) on the existing ESP, keeping its
+# PARTUUID:
+#   1. back up the ESP (its vendorfw/ is this Mac's Apple firmware, asahi/ the
+#      stub's records) to /var/root/smartroom-esp-backup-<time>
+#   2. replace the Linux partition --linux by the image's two: Boot (2 GiB)
+#      and Root (the rest), as diskutil addPartition %Linux% %noformat%
+#   3. write boot.img and root.img raw (read back and compared)
+#   4. format the ESP as the Engine does (newfs_msdos -F 32, the image's
+#      volume id 0x4f4d5801, which /etc/fstab names) and copy the payload's
+#      esp/ (minus the MacBook Neo's m1n1/boot-j700.bin), then this Mac's
+#      vendorfw/ and asahi/ back, then omarchy/install.conf (encrypt=0 by
+#      default; omarchy-mac-boot's own switch)
+# Without --yes it only checks and prints the plan. It never touches the stub,
+# its boot policy, macOS or any other partition. Blessing is a separate step.
+set -euo pipefail
+PATH=/usr/bin:/bin:/usr/sbin:/sbin
+die() { echo "install-onto-existing-stub: $*" >&2; exit 1; }
+say() { echo "== $*"; }
+zip="" sha="" esp="" esp_uuid="" linux="" encrypt=0 readback=0 yes=0
+while [ $# -gt 0 ]; do
+  case $1 in
+    --zip) zip=$2; shift ;;
+    --sha256) sha=$2; shift ;;
+    --esp) esp=$2; shift ;;
+    --esp-partuuid) esp_uuid=$2; shift ;;
+    --linux) linux=$2; shift ;;
+    --encrypt) encrypt=$2; shift ;;
+    --full-readback) readback=1 ;;
+    --yes) yes=1 ;;
+    *) die "unknown argument $1" ;;
+  esac
+  shift
+done
+[ "$(uname -s)" = Darwin ] || die "this runs on macOS"
+[ "$(id -u)" = 0 ] || die "run with sudo"
+[ -f "$zip" ] && [ -n "$sha" ] && [ -n "$esp" ] && [ -n "$esp_uuid" ] && [ -n "$linux" ] || die "missing --zip/--sha256/--esp/--esp-partuuid/--linux"
+case $encrypt in 0|1) ;; *) die "--encrypt is 0 or 1" ;; esac
+
+info() { diskutil info -plist "$1" | plutil -extract "$2" raw -o - - 2>/dev/null; }
+upper() { printf '%s' "$1" | tr '[:lower:]' '[:upper:]'; }
+
+say "checking the payload"
+got=$(shasum -a 256 "$zip" | awk '{print $1}')
+[ "$got" = "$(printf '%s' "$sha" | tr '[:upper:]' '[:lower:]')" ] || die "payload sha256 is $got, not $sha"
+members=$(tar -tf "$zip")
+for m in boot.img root.img esp/m1n1/boot.bin esp/EFI/BOOT/BOOTAA64.EFI esp/limine.conf; do
+  printf '%s\n' "$members" | grep -qx "$m" || die "payload has no $m"
+done
+case $(basename "$zip") in
+  smartroom-firmware-*) os_name="SmartRoom Firmware" ;;
+  omarchy-*) os_name=Omarchy ;;
+  *) die "not an Omarchy Mac payload name: $(basename "$zip")" ;;
+esac
+label=$(printf 'EFI - %s' "$os_name" | cut -c1-11)
+
+say "checking the disk"
+disk=$(info "$esp" ParentWholeDisk) || die "no $esp"
+[ "$(info "$linux" ParentWholeDisk)" = "$disk" ] || die "$linux is not on $disk"
+[ "$(upper "$(info "$esp" DiskUUID)")" = "$(upper "$esp_uuid")" ] || die "$esp's partition UUID is not $esp_uuid"
+[ "$(info "$esp" Content)" = EFI ] || die "$esp is not an EFI system partition"
+lcontent=$(info "$linux" Content)
+case $(upper "$lcontent") in
+  0FC63DAF-8483-4772-8E79-3D69D8477DE4|LINUX*) ;;
+  *) die "$linux is $lcontent, not a Linux partition" ;;
+esac
+ids=$(diskutil list "$disk" | awk -v d="$disk" '$NF ~ ("^" d "s[0-9]+$") { print $NF }')
+after_esp=$(printf '%s\n' $ids | awk -v e="$esp" 'found { print; exit } $0 == e { found = 1 }')
+[ "$after_esp" = "$linux" ] || die "$linux does not follow $esp on $disk (next is ${after_esp:-nothing})"
+boot_size=2147483648
+linux_size=$(info "$linux" TotalSize)
+root_size=$(( linux_size - boot_size ))
+member_size() { tar -tvf "$zip" "$1" | awk 'NR == 1 { print $5 }'; }
+boot_img=$(member_size boot.img)
+root_img=$(member_size root.img)
+case $boot_img$root_img in *[!0-9]*|"") die "cannot read the image sizes from the payload" ;; esac
+[ "$boot_img" -le "$boot_size" ] || die "boot.img ($boot_img bytes) does not fit 2 GiB"
+[ "$root_img" -le "$root_size" ] || die "root.img ($root_img bytes) does not fit $root_size bytes"
+echo "disk $disk: ESP $esp (PARTUUID $esp_uuid, kept, reformatted as '$label' id 0x4F4D5801)"
+echo "replace $linux ($linux_size bytes) by Boot 2 GiB + Root $root_size bytes"
+echo "payload $(basename "$zip") ($os_name), install.conf encrypt=$encrypt"
+diskutil list "$disk"
+[ $yes = 1 ] || { echo "checked; nothing changed (add --yes to install)"; exit 0; }
+
+stamp=$(date +%Y%m%d-%H%M%S)
+backup=/var/root/smartroom-esp-backup-$stamp
+say "1/4 backing up the ESP to $backup"
+diskutil mount "$esp" >/dev/null
+vol=$(info "$esp" MountPoint)
+[ -d "$vol" ] || die "cannot mount $esp"
+mkdir -p "$backup"
+ditto "$vol" "$backup/esp"
+[ -s "$backup/esp/vendorfw/firmware.cpio" ] && [ -s "$backup/esp/vendorfw/firmware.tar" ] ||
+  die "the ESP has no vendorfw/firmware.cpio and firmware.tar (this Mac's firmware); stopping before any change"
+diskutil unmount "$esp" >/dev/null
+
+say "2/4 replacing $linux by Boot and Root"
+diskutil eraseVolume free none "$linux"
+diskutil addPartition "$esp" %Linux% %noformat% "${boot_size}B"
+ids=$(diskutil list "$disk" | awk -v d="$disk" '$NF ~ ("^" d "s[0-9]+$") { print $NF }')
+bootp=$(printf '%s\n' $ids | awk -v e="$esp" 'found { print; exit } $0 == e { found = 1 }')
+[ -n "$bootp" ] && [ "$(info "$bootp" TotalSize)" = "$boot_size" ] || die "could not find the new Boot partition"
+diskutil addPartition "$bootp" %Linux% %noformat% "${root_size}B" ||
+  diskutil addPartition "$bootp" %Linux% %noformat% "$(( root_size - 16777216 ))B"
+ids=$(diskutil list "$disk" | awk -v d="$disk" '$NF ~ ("^" d "s[0-9]+$") { print $NF }')
+rootp=$(printf '%s\n' $ids | awk -v e="$bootp" 'found { print; exit } $0 == e { found = 1 }')
+[ -n "$rootp" ] || die "could not find the new Root partition"
+diskutil unmount "$bootp" >/dev/null 2>&1 || true
+diskutil unmount "$rootp" >/dev/null 2>&1 || true
+echo "Boot $bootp, Root $rootp"
+
+say "3/4 writing boot.img to $bootp and root.img to $rootp"
+write_image() { # member partition size
+  local want blocks have
+  blocks=$(( $3 / 4194304 ))
+  [ $(( blocks * 4194304 )) = "$3" ] || die "$1 is not a multiple of 4 MiB"
+  tar -xOf "$zip" "$1" | dd of="/dev/r$2" bs=4m 2>/dev/null
+  sync
+  if [ "$1" = boot.img ] || [ $readback = 1 ]; then
+    want=$(tar -xOf "$zip" "$1" | shasum -a 256 | awk '{print $1}')
+    have=$(dd if="/dev/r$2" bs=4m count="$blocks" 2>/dev/null | shasum -a 256 | awk '{print $1}')
+    [ "$have" = "$want" ] || die "$1 read back from $2 does not match ($have != $want)"
+    echo "$1: written and read back ($want)"
+  else
+    echo "$1: written ($3 bytes; --full-readback also reads it back)"
+  fi
+}
+write_image boot.img "$bootp" "$boot_img"
+write_image root.img "$rootp" "$root_img"
+
+say "4/4 formatting the ESP and copying the payload's esp/"
+diskutil unmount "$esp" >/dev/null 2>&1 || true
+newfs_msdos -F 32 -v "$label" -I 0x4f4d5801 "/dev/r$esp" >/dev/null
+diskutil mount "$esp" >/dev/null
+vol=$(info "$esp" MountPoint)
+[ -d "$vol" ] || die "cannot mount the new ESP"
+tmp=$(mktemp -d /var/root/smartroom-esp.XXXXXX)
+tar -xf "$zip" -C "$tmp" esp
+rm -f "$tmp/esp/m1n1/boot-j700.bin"   # the MacBook Neo's stage 2; every other Mac drops it
+cp -RX "$tmp/esp/." "$vol/"
+cp -RX "$backup/esp/vendorfw" "$vol/"
+[ ! -d "$backup/esp/asahi" ] || cp -RX "$backup/esp/asahi" "$vol/"
+mkdir -p "$vol/omarchy"
+printf 'format=1\nencrypt=%s\nlane=stable\n' "$encrypt" >"$vol/omarchy/install.conf"
+rm -rf "$tmp"
+find "$vol" -name '._*' -delete 2>/dev/null || true
+sync
+ls -la "$vol" "$vol/m1n1" "$vol/EFI/Linux"
+cat "$vol/limine.conf" | grep -E '^/|cmdline|timeout'
+diskutil unmount "$esp" >/dev/null
+diskutil list "$disk"
+echo "done. The ESP backup is $backup. Next: bless the stub (--nextonly) and reboot."

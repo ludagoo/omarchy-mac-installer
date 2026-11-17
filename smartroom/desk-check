@@ -1,0 +1,77 @@
+#!/bin/bash
+# Desk-check a built image (stock or SmartRoom) on an aarch64 Linux host, as root:
+#   smartroom/desk-check ZIP WORKDIR
+# Unpacks the payload into WORKDIR, mounts root.img (@), boot.img and the ESP
+# tree read-only, and runs the image's own omarchy-apple-silicon-boot-check
+# (omarchy-mac-boot) in it, full and --boot-chain, plus the headless facts a
+# room needs. Prints PASS/FAIL lines; exits non-zero on any FAIL.
+set -uo pipefail
+zip=${1:?Usage: smartroom/desk-check ZIP WORKDIR}
+work=${2:?Usage: smartroom/desk-check ZIP WORKDIR}
+(( EUID == 0 )) || { echo "run as root" >&2; exit 1; }
+mkdir -p "$work/x" "$work/mnt"
+m=$work/mnt
+cleanup() { umount -R "$m" 2>/dev/null; }
+trap cleanup EXIT
+[[ -f $work/x/root.img ]] || bsdtar -xf "$zip" -C "$work/x" root.img boot.img esp || exit 1
+mount -o ro,loop,subvol=@ "$work/x/root.img" "$m" || exit 1
+mount -o ro,loop "$work/x/boot.img" "$m/boot" || exit 1
+mount --bind -o ro "$work/x/esp" "$m/boot/efi" || exit 1
+for d in proc sys dev run tmp; do
+  case $d in
+    proc) mount -t proc proc "$m/proc" ;;
+    sys) mount -t sysfs sys "$m/sys" ;;
+    dev) mount --rbind /dev "$m/dev" ;;
+    *) mount -t tmpfs "$d" "$m/$d" ;;
+  esac
+done
+fails=0
+pass() { echo "PASS $*"; }
+failed() { echo "FAIL $*"; fails=$((fails + 1)); }
+check() { local what=$1; shift; if "$@" >/dev/null 2>&1; then pass "$what"; else failed "$what"; fi; }
+kver=$(ls "$m/usr/lib/modules" | grep -- '-ARCH$' | head -n 1)
+echo "kernel $kver"
+for mode in "" --boot-chain; do
+  if out=$(chroot "$m" env -i PATH=/usr/bin:/usr/sbin OMARCHY_BOOT_CHECK_UNAME="$kver" \
+      omarchy-apple-silicon-boot-check $mode linux-aurora 2>&1); then
+    pass "omarchy-apple-silicon-boot-check ${mode:-(full)}: ${out##*$'\n'}"
+  else
+    failed "omarchy-apple-silicon-boot-check ${mode:-(full)}: $out"
+  fi
+done
+wants=$m/etc/systemd/system/multi-user.target.wants
+check "NetworkManager enabled (wired DHCP at boot)" test -L "$wants/NetworkManager.service"
+check "NetworkManager-wait-online masked (nothing waits on the network)" test "$(readlink "$m/etc/systemd/system/NetworkManager-wait-online.service")" = /dev/null
+check "first boot armed" test -f "$m/var/lib/omarchy/mac-first-boot/pending"
+check "Limine on the U-Boot slot" cmp -s "$m/usr/share/limine/BOOTAA64.EFI" "$m/boot/efi/EFI/BOOT/BOOTAA64.EFI"
+check "m1n1 stage 2 on the ESP" test -s "$m/boot/efi/m1n1/boot.bin"
+check "j475c device tree in the kernel package" test -s "$m/boot/dtbs/apple/t6021-j475c.dtb" -o -n "$(find "$m/usr/lib/modules/$kver" "$m/boot" -name 't6021-j475c.dtb' 2>/dev/null | head -n 1)"
+check "Aquantia 10GbE driver (atlantic) shipped" test -n "$(find "$m/usr/lib/modules/$kver" -name 'atlantic.ko*' | head -n 1)"
+cmdline=$(sed -n 's/^ *cmdline: //p' "$m/boot/efi/limine.conf" | head -n 1)
+echo "Limine cmdline: $cmdline"
+echo "Limine entries: $(grep -E '^/' "$m/boot/efi/limine.conf" | paste -sd' ' -)"
+echo "Limine timeout: $(sed -n 's/^timeout: //p' "$m/boot/efi/limine.conf")"
+if [[ -e $m/etc/omarchy-mac-boot/headless ]]; then
+  echo "== SmartRoom image"
+  check "Limine entry says SmartRoom Firmware" grep -qx '/+SmartRoom Firmware' "$m/boot/efi/limine.conf"
+  check "ESP install.conf: encrypt=0" grep -qx 'encrypt=0' "$m/boot/efi/omarchy/install.conf"
+  check "sshd enabled" test -L "$wants/sshd.service"
+  check "SmartRoom first boot enabled" test -L "$wants/smartroomos-firstboot.service"
+  check "omarchy-mac-first-boot enabled" test -L "$wants/omarchy-mac-first-boot.service"
+  check "timezone America/Chicago" test "$(readlink "$m/etc/localtime")" = /usr/share/zoneinfo/America/Chicago
+  check "snapshots left to Omarchy" test -e "$m/etc/smartroomos/omarchy-base"
+  check "no owner provisioning armed" test ! -e "$m/var/lib/omarchy/provisioning/pending"
+  for pkg in omarchy omarchy-settings omarchy-mac sddm plymouth quickshell uwsm; do
+    check "not installed: $pkg" test -z "$(ls -d "$m/var/lib/pacman/local/$pkg"-[0-9]* 2>/dev/null)"
+  done
+  check "no display manager" test ! -e "$m/etc/systemd/system/display-manager.service" -o "$(readlink "$m/etc/systemd/system/display-manager.service")" = /usr/lib/systemd/system/greetd.service
+  for f in etc/sysctl.d/10-smartroomos-panic.conf etc/limine-entry-tool.d/smartroomos.conf etc/initcpio/install/asahi; do
+    check "old boot change absent: $f" test ! -e "$m/$f"
+  done
+else
+  echo "== stock image (owner setup waits on tty1 by design; DHCP does not wait for it)"
+  check "sshd not enabled (stock)" test ! -e "$wants/sshd.service"
+fi
+echo "packages: $(ls "$m/var/lib/pacman/local" | wc -l)"
+(( fails == 0 )) && echo "DESK-CHECK PASS" || echo "DESK-CHECK FAIL ($fails)"
+exit $(( fails > 0 ))

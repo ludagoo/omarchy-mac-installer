@@ -6,13 +6,17 @@
 # --channel-set --channel stable ...), PKGDIR what smartroom/build-packages
 # wrote, COMMIT a ludagoo/smartroomcontrollerfirmware commit (omarchy-base),
 # AUTHORIZED_KEYS the admin public keys. OUT must not exist yet.
+# --firmware-repo URL|PATH clones the firmware from elsewhere (the GitHub repo
+# is private: a git bundle made on a machine that can read it works).
 set -euo pipefail
 here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 inputs="" recovery="" cache="" packages="" firmware="" keys=""
+firmware_repo=https://github.com/ludagoo/smartroomcontrollerfirmware.git
 while (($# > 1)); do
   case $1 in
     --inputs) inputs=$2 ;; --recovery-app) recovery=$2 ;; --cache) cache=$2 ;;
     --packages) packages=$2 ;; --firmware) firmware=$2 ;; --keys) keys=$2 ;;
+    --firmware-repo) firmware_repo=$2 ;;
     *) break ;;
   esac
   shift 2
@@ -29,7 +33,7 @@ mkdir -p "$dir/setup/firmware"
 install -m 0755 "$here/room/setup-run" "$dir/setup/run"
 cp "$here/room/overlay-exclude" "$dir/setup/"
 cp "$keys" "$dir/setup/authorized_keys"
-git clone -q https://github.com/ludagoo/smartroomcontrollerfirmware.git "$dir/fw"
+git clone -q "$firmware_repo" "$dir/fw"
 git -C "$dir/fw" checkout -q "$firmware"
 firmware=$(git -C "$dir/fw" rev-parse HEAD)
 git -C "$dir/fw" archive HEAD bin configs overlay studio-install/firstboot.sh \
