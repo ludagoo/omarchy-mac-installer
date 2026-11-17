@@ -5,7 +5,9 @@
 #
 #   install-onto-existing-stub --zip PAYLOAD.zip --sha256 HEX \
 #     --esp diskNsA --esp-partuuid UUID --linux diskNsB [--encrypt 0|1] \
-#     [--full-readback] [--yes]
+#     [--firstboot-env FILE] [--full-readback] [--yes]
+# or, on a Mac this script already installed (Boot and Root exist):
+#     ... --esp diskNsA --esp-partuuid UUID --boot diskNsB --root diskNsC ...
 #
 # What the stub's stage 1 m1n1 chainloads is "<ESP PARTUUID>;m1n1/boot.bin",
 # so everything after it lives on the ESP and the Linux partitions. This does
@@ -28,7 +30,7 @@ set -euo pipefail
 PATH=/usr/bin:/bin:/usr/sbin:/sbin
 die() { echo "install-onto-existing-stub: $*" >&2; exit 1; }
 say() { echo "== $*"; }
-zip="" sha="" esp="" esp_uuid="" linux="" encrypt=0 readback=0 yes=0
+zip="" sha="" esp="" esp_uuid="" linux="" bootp="" rootp="" encrypt=0 readback=0 yes=0 fbenv=""
 while [ $# -gt 0 ]; do
   case $1 in
     --zip) zip=$2; shift ;;
@@ -36,6 +38,9 @@ while [ $# -gt 0 ]; do
     --esp) esp=$2; shift ;;
     --esp-partuuid) esp_uuid=$2; shift ;;
     --linux) linux=$2; shift ;;
+    --boot) bootp=$2; shift ;;
+    --root) rootp=$2; shift ;;
+    --firstboot-env) fbenv=$2; shift ;;
     --encrypt) encrypt=$2; shift ;;
     --full-readback) readback=1 ;;
     --yes) yes=1 ;;
@@ -45,7 +50,13 @@ while [ $# -gt 0 ]; do
 done
 [ "$(uname -s)" = Darwin ] || die "this runs on macOS"
 [ "$(id -u)" = 0 ] || die "run with sudo"
-[ -f "$zip" ] && [ -n "$sha" ] && [ -n "$esp" ] && [ -n "$esp_uuid" ] && [ -n "$linux" ] || die "missing --zip/--sha256/--esp/--esp-partuuid/--linux"
+[ -f "$zip" ] && [ -n "$sha" ] && [ -n "$esp" ] && [ -n "$esp_uuid" ] || die "missing --zip/--sha256/--esp/--esp-partuuid"
+if [ -n "$linux" ]; then
+  [ -z "$bootp$rootp" ] || die "--linux (split one partition) or --boot and --root (rewrite both), not both"
+else
+  [ -n "$bootp" ] && [ -n "$rootp" ] || die "give --linux, or --boot and --root"
+fi
+[ -z "$fbenv" ] || [ -f "$fbenv" ] || die "no $fbenv"
 case $encrypt in 0|1) ;; *) die "--encrypt is 0 or 1" ;; esac
 
 info() { diskutil info -plist "$1" | plutil -extract "$2" raw -o - - 2>/dev/null; }
@@ -67,20 +78,37 @@ label=$(printf 'EFI - %s' "$os_name" | cut -c1-11)
 
 say "checking the disk"
 disk=$(info "$esp" ParentWholeDisk) || die "no $esp"
-[ "$(info "$linux" ParentWholeDisk)" = "$disk" ] || die "$linux is not on $disk"
 [ "$(upper "$(info "$esp" DiskUUID)")" = "$(upper "$esp_uuid")" ] || die "$esp's partition UUID is not $esp_uuid"
 [ "$(info "$esp" Content)" = EFI ] || die "$esp is not an EFI system partition"
-lcontent=$(info "$linux" Content)
-case $(upper "$lcontent") in
-  0FC63DAF-8483-4772-8E79-3D69D8477DE4|LINUX*) ;;
-  *) die "$linux is $lcontent, not a Linux partition" ;;
-esac
-ids=$(diskutil list "$disk" | awk -v d="$disk" '$NF ~ ("^" d "s[0-9]+$") { print $NF }')
-after_esp=$(printf '%s\n' $ids | awk -v e="$esp" 'found { print; exit } $0 == e { found = 1 }')
-[ "$after_esp" = "$linux" ] || die "$linux does not follow $esp on $disk (next is ${after_esp:-nothing})"
+is_linux() {
+  local content
+  content=$(info "$1" Content)
+  case $(upper "$content") in
+    0FC63DAF-8483-4772-8E79-3D69D8477DE4|LINUX*) ;;
+    *) die "$1 is $content, not a Linux partition" ;;
+  esac
+  [ "$(info "$1" ParentWholeDisk)" = "$disk" ] || die "$1 is not on $disk"
+}
+# The partition that follows $1 on the disk. diskutil list numbers partitions
+# by their GPT slot, not by where they sit, so order them by offset.
+next_of() {
+  local id
+  for id in $(diskutil list "$disk" | awk -v d="$disk" '$NF ~ ("^" d "s[0-9]+$") { print $NF }'); do
+    printf '%s %s\n' "$(info "$id" PartitionMapPartitionOffset)" "$id"
+  done | sort -n | awk -v e="$1" 'found { print $2; exit } $2 == e { found = 1 }'
+}
 boot_size=2147483648
-linux_size=$(info "$linux" TotalSize)
-root_size=$(( linux_size - boot_size ))
+if [ -n "$linux" ]; then
+  is_linux "$linux"
+  [ "$(next_of "$esp")" = "$linux" ] || die "$linux does not follow $esp on $disk"
+  linux_size=$(info "$linux" TotalSize)
+  root_size=$(( linux_size - boot_size ))
+else
+  is_linux "$bootp"; is_linux "$rootp"
+  [ "$(next_of "$esp")" = "$bootp" ] && [ "$(next_of "$bootp")" = "$rootp" ] || die "$bootp and $rootp do not follow $esp"
+  [ "$(info "$bootp" TotalSize)" = "$boot_size" ] || die "$bootp is not 2 GiB"
+  root_size=$(info "$rootp" TotalSize)
+fi
 member_size() { tar -tvf "$zip" "$1" | awk 'NR == 1 { print $5 }'; }
 boot_img=$(member_size boot.img)
 root_img=$(member_size root.img)
@@ -88,7 +116,11 @@ case $boot_img$root_img in *[!0-9]*|"") die "cannot read the image sizes from th
 [ "$boot_img" -le "$boot_size" ] || die "boot.img ($boot_img bytes) does not fit 2 GiB"
 [ "$root_img" -le "$root_size" ] || die "root.img ($root_img bytes) does not fit $root_size bytes"
 echo "disk $disk: ESP $esp (PARTUUID $esp_uuid, kept, reformatted as '$label' id 0x4F4D5801)"
-echo "replace $linux ($linux_size bytes) by Boot 2 GiB + Root $root_size bytes"
+if [ -n "$linux" ]; then
+  echo "replace $linux ($linux_size bytes) by Boot 2 GiB + Root $root_size bytes"
+else
+  echo "rewrite Boot $bootp and Root $rootp ($root_size bytes)"
+fi
 echo "payload $(basename "$zip") ($os_name), install.conf encrypt=$encrypt"
 diskutil list "$disk"
 [ $yes = 1 ] || { echo "checked; nothing changed (add --yes to install)"; exit 0; }
@@ -105,19 +137,29 @@ ditto "$vol" "$backup/esp"
   die "the ESP has no vendorfw/firmware.cpio and firmware.tar (this Mac's firmware); stopping before any change"
 diskutil unmount "$esp" >/dev/null
 
+if [ -n "$linux" ]; then
 say "2/4 replacing $linux by Boot and Root"
 diskutil eraseVolume free none "$linux"
 diskutil addPartition "$esp" %Linux% %noformat% "${boot_size}B"
-ids=$(diskutil list "$disk" | awk -v d="$disk" '$NF ~ ("^" d "s[0-9]+$") { print $NF }')
-bootp=$(printf '%s\n' $ids | awk -v e="$esp" 'found { print; exit } $0 == e { found = 1 }')
+bootp=$(next_of "$esp")
 [ -n "$bootp" ] && [ "$(info "$bootp" TotalSize)" = "$boot_size" ] || die "could not find the new Boot partition"
+is_linux "$bootp"
 diskutil addPartition "$bootp" %Linux% %noformat% "${root_size}B" ||
   diskutil addPartition "$bootp" %Linux% %noformat% "$(( root_size - 16777216 ))B"
-ids=$(diskutil list "$disk" | awk -v d="$disk" '$NF ~ ("^" d "s[0-9]+$") { print $NF }')
-rootp=$(printf '%s\n' $ids | awk -v e="$bootp" 'found { print; exit } $0 == e { found = 1 }')
+rootp=$(next_of "$bootp")
 [ -n "$rootp" ] || die "could not find the new Root partition"
+is_linux "$rootp"
+else
+say "2/4 keeping Boot $bootp and Root $rootp"
+fi
 diskutil unmount "$bootp" >/dev/null 2>&1 || true
 diskutil unmount "$rootp" >/dev/null 2>&1 || true
+# Last checks before any raw write: both are Linux partitions on this disk,
+# right after the ESP, sized for their images.
+is_linux "$bootp"; is_linux "$rootp"
+[ "$(next_of "$esp")" = "$bootp" ] && [ "$(next_of "$bootp")" = "$rootp" ] || die "Boot and Root are not right after the ESP"
+[ "$(info "$bootp" TotalSize)" = "$boot_size" ] || die "$bootp is not 2 GiB"
+[ "$(info "$rootp" TotalSize)" -ge "$root_img" ] || die "$rootp is smaller than root.img"
 echo "Boot $bootp, Root $rootp"
 
 say "3/4 writing boot.img to $bootp and root.img to $rootp"
@@ -153,11 +195,17 @@ cp -RX "$backup/esp/vendorfw" "$vol/"
 [ ! -d "$backup/esp/asahi" ] || cp -RX "$backup/esp/asahi" "$vol/"
 mkdir -p "$vol/omarchy"
 printf 'format=1\nencrypt=%s\nlane=stable\n' "$encrypt" >"$vol/omarchy/install.conf"
+if [ -n "$fbenv" ]; then
+  mkdir -p "$vol/asahi/extras"
+  cp -X "$fbenv" "$vol/asahi/extras/firstboot.env"   # SmartRoom first boot reads it
+fi
 rm -rf "$tmp"
 find "$vol" -name '._*' -delete 2>/dev/null || true
 sync
-ls -la "$vol" "$vol/m1n1" "$vol/EFI/Linux"
-cat "$vol/limine.conf" | grep -E '^/|cmdline|timeout'
+ls -la "$vol" "$vol/m1n1" "$vol/EFI/Linux" || true
+grep -E '^/|cmdline|timeout' "$vol/limine.conf" || true
+[ -s "$vol/m1n1/boot.bin" ] && [ -s "$vol/EFI/BOOT/BOOTAA64.EFI" ] && [ -s "$vol/vendorfw/firmware.cpio" ] ||
+  die "the new ESP is missing m1n1/boot.bin, EFI/BOOT/BOOTAA64.EFI or vendorfw/firmware.cpio"
 diskutil unmount "$esp" >/dev/null
 diskutil list "$disk"
 echo "done. The ESP backup is $backup. Next: bless the stub (--nextonly) and reboot."
