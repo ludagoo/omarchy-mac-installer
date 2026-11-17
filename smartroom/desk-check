@@ -59,7 +59,7 @@ if [[ -e $m/etc/omarchy-mac-boot/headless ]]; then
   check "SmartRoom first boot enabled" test -L "$wants/smartroomos-firstboot.service"
   check "SmartRoom first boot runs after Omarchy's" grep -q 'After=omarchy-mac-first-boot.service' "$m/etc/systemd/system/smartroomos-firstboot.service.d/10-after-omarchy-first-boot.conf"
   check "omarchy-mac-first-boot enabled" test -L "$wants/omarchy-mac-first-boot.service"
-  check "timezone America/Chicago" test "$(readlink "$m/etc/localtime")" = /usr/share/zoneinfo/America/Chicago
+  check "timezone America/Chicago" test "$(readlink "$m/etc/localtime" | sed 's|^\.\./|/|')" = /usr/share/zoneinfo/America/Chicago
   check "snapshots left to Omarchy" test -e "$m/etc/smartroomos/omarchy-base"
   check "no owner provisioning armed" test ! -e "$m/var/lib/omarchy/provisioning/pending"
   for pkg in omarchy omarchy-settings omarchy-mac sddm plymouth quickshell uwsm; do

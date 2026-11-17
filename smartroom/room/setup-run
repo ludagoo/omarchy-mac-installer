@@ -69,5 +69,9 @@ SMARTROOMOS_IMAGE_BUILD=1 \
   "$fw/bin/smartroomos-studio-setup"
 rm -rf "$scratch" "$overlay"
 
+# As on a stock Omarchy Mac (its install/config/enable-services.sh, which a
+# room does not run): nothing at boot waits for the network to come up.
+systemctl mask NetworkManager-wait-online.service
+
 install -D -m 0644 "$here/build-info" /usr/share/smartroomos/build-info
 echo "setup: SmartRoom room layer installed"
