@@ -419,3 +419,25 @@ assert mac["offset"] + mac["size"] + 80 * (1 << 30) == rec["offset"], (mac, rec)
 assert s["default_boot"] == "disk5s1"
 PY
 echo "ok - shrinks macOS by exactly --size for the install (resize candidate)"
+
+# no --size: macOS keeps its minimum (100 GiB here) plus 20 GiB, SmartRoom Firmware gets the rest
+python3 - "$state" "$t/disk.initial.json" <<'PY'
+import json, sys
+s = json.load(open(sys.argv[2])); m = next(p for p in s["parts"] if p["id"] == "disk0s2")
+r = next(p for p in s["parts"] if p["id"] == "disk0s3"); m["size"] = r["offset"] - m["offset"]
+json.dump(s, open(sys.argv[1], "w"))
+PY
+rm -rf "$t/vol"/* "$st"
+pw "$PW" | run "${common[@]}" --firstboot-env "$t/fb.env" --source disk0s2 --yes || fail "default-size install: $(tail -8 "$t/out")"
+python3 - "$state" "$t/out" <<'PY' || fail "default size: $(grep -E 'chosen|keeps' "$t/out")"
+import json, re, sys
+G = 1 << 30
+s = json.load(open(sys.argv[1])); p = {x["id"]: x for x in s["parts"]}
+out = open(sys.argv[2]).read()
+container = p["disk0s3"]["offset"] - p["disk0s2"]["offset"]   # macOS before the install
+want = (container - 100 * G - 20 * G) // G * G
+assert f"chosen: resize disk0s2, {want} bytes" in out, out[-600:]
+assert "plus 20 GiB); SmartRoom Firmware gets the rest" in out
+assert p["disk0s2"]["size"] + want == container, (p["disk0s2"], want)
+PY
+echo "ok - without --size, macOS keeps its minimum plus 20 GiB and SmartRoom Firmware gets the rest"

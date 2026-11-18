@@ -78,9 +78,10 @@ Firmware gets the rest of the disk.** macOS stays only for the Zoom Rooms transi
 
 - The dry run lists the macOS container with `minimum_container_bytes` (what macOS itself needs;
   about 77.5 GB on the M2 Max Studio with macOS 14.5).
-- Leave macOS that minimum plus about 20 GB for its own updates, and give the rest to SmartRoom
-  Firmware: `--size` = macOS container size - minimum - 20G. On a 500 GB Studio that is about
-  100 GB for macOS and about 390 GB for SmartRoom Firmware.
+- `engine-install` applies the rule itself: with `--source <macOS container>` and no `--size`,
+  macOS keeps that minimum plus 20 GiB for its own updates and SmartRoom Firmware gets the rest
+  (it prints the split). On a 500 GB Studio that is about 100 GB for macOS and about 390 GB for
+  SmartRoom Firmware. `--size N` overrides it; don't use it for room installs.
 - The engine's floor is ~38.5 GB (Root's 32 GiB minimum from `installer_data.json`); never go near it.
 
 If a Mac was installed with a smaller Root, it can be grown later without a reinstall or 1TR:
@@ -132,14 +133,14 @@ cd ~/smartroom
 (cd image && shasum -a 256 -c SHA256)
 Z=$(ls image/smartroom-firmware-*-os-package.zip); S=$(cut -d' ' -f1 image/SHA256)
 args=(--payload "$Z" --sha256 "$S" --installer-data image/installer_data.json --owner ADMIN
-  --firstboot-env image/firstboot.env --source disk0s2 --size <macOS size - minimum - 20G>
+  --firstboot-env image/firstboot.env --source disk0s2
   --restore-image "/tmp/omarchy-dmg/Omarchy Installer.app/Contents/Helpers/omarchy-restore-image")
 sudo smartroom/mac/engine-install "${args[@]}"            # password on the prompt (or stdin)
 ```
 
 Use the macOS container the dry run lists as `resize` for `--source`
-(usually `disk0s2`), or leave `--source/--size` out when the Mac already has
-free space. Then install (tens of minutes; most is writing Root):
+(usually `disk0s2`); the dry run prints how much macOS keeps. Leave `--source` out only when
+the Mac already has free space. Then install (tens of minutes; most is writing Root):
 
 ```sh
 sudo smartroom/mac/engine-install "${args[@]}" --yes
