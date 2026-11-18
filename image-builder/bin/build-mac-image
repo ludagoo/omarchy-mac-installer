@@ -1139,6 +1139,28 @@ write_installed_config() {
   mirrorlist=$templates/aarch64-apple/mirrorlist-$channel
   [[ -f $mirrorlist ]] || mirrorlist=$templates/aarch64/mirrorlist-$channel
   [[ -f $mirrorlist ]] || mirrorlist=$templates/mirrorlist-aarch64
+  # SmartRoom does not install omarchy-settings, so its helpers are the only
+  # templates on the root. They carry the stable channel. An edge image takes
+  # the template the build already accepted from the settings package.
+  if [[ $profile == smartroom && ! -f $repositories/pacman-$channel.conf ]]; then
+    local archive member staged
+    archive=$candidates/$(candidate_archive omarchy-settings)
+    member=usr/share/omarchy/default/pacman/aarch64-apple/pacman-$channel.conf
+    [[ -f $archive && $(bsdtar -tvf "$archive" "$member" 2>/dev/null) == -* ]] ||
+      fail "the image ships no Apple Silicon pacman configuration for $channel"
+    staged=$work/channel-pacman
+    rm -rf "$staged"
+    mkdir -p "$staged"
+    bsdtar -xOf "$archive" "$member" >"$staged/pacman-$channel.conf"
+    [[ -s $staged/pacman-$channel.conf ]] ||
+      fail "the image ships no Apple Silicon pacman configuration for $channel"
+    member=usr/share/omarchy/default/pacman/aarch64-apple/mirrorlist-$channel
+    if [[ $(bsdtar -tvf "$archive" "$member" 2>/dev/null) == -* ]]; then
+      bsdtar -xOf "$archive" "$member" >"$staged/mirrorlist-$channel"
+      [[ -s $staged/mirrorlist-$channel ]] && mirrorlist=$staged/mirrorlist-$channel
+    fi
+    repositories=$staged
+  fi
   [[ -f $repositories/pacman-$channel.conf ]] || fail "the image ships no Apple Silicon pacman configuration for $channel"
   [[ -f $mirrorlist ]] || fail "the runtime ships no aarch64 mirror list for $channel"
   python3 "$ROOT/builder/test_image_pin.py" render "$repositories/pacman-$channel.conf" "$candidates/import.json" \

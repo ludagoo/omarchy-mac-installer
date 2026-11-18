@@ -1085,6 +1085,34 @@ PY
 ) || fail "the edge image does not enroll an aura first stage for j475cap only"
 pass "an aura package in the SmartRoom repo stages aura stage 1 and qualifies only j475cap on 13.5"
 
+# SmartRoom does not install omarchy-settings. The edge pacman template is in
+# that package, which the build already accepted, and has to become pacman.conf.
+(
+  profile=smartroom
+  work=$scratch/pacman-work
+  target=$scratch/pacman-target
+  candidates=$scratch/pacman-candidates
+  mkdir -p "$work" "$target/etc" "$candidates/stage/usr/share/omarchy/default/pacman/aarch64-apple"
+  printf '[options]\n# edge template\n[omarchy]\nServer = https://pkgs.omarchy.org/edge/$arch\n' \
+    >"$candidates/stage/usr/share/omarchy/default/pacman/aarch64-apple/pacman-edge.conf"
+  printf '# edge mirrors\nServer = https://pkgs.omarchy.org/edge/$arch\n' \
+    >"$candidates/stage/usr/share/omarchy/default/pacman/aarch64-apple/mirrorlist-edge"
+  tar -cf "$candidates/settings.pkg.tar" -C "$candidates/stage" .
+  printf '%s\n' '{"packages":[{"name":"omarchy-settings-dev","role":"omarchy-settings","filename":"settings.pkg.tar"}]}' \
+    >"$candidates/import.json"
+  (fail() { builder_fail "$@"; }; write_installed_config)
+  grep -Fxq '# edge template' "$target/etc/pacman.conf" || exit 1
+  grep -Fxq '# edge mirrors' "$target/etc/pacman.d/mirrorlist" || exit 1
+  # A template already on the root (the stable helpers) wins over the package.
+  mkdir -p "$target/usr/share/omarchy/default/pacman/aarch64-apple"
+  printf '[options]\n# helpers template\n' >"$target/usr/share/omarchy/default/pacman/aarch64-apple/pacman-edge.conf"
+  printf '# helpers mirrors\n' >"$target/usr/share/omarchy/default/pacman/aarch64-apple/mirrorlist-edge"
+  (fail() { builder_fail "$@"; }; write_installed_config)
+  grep -Fxq '# helpers template' "$target/etc/pacman.conf" || exit 1
+  grep -Fxq '# helpers mirrors' "$target/etc/pacman.d/mirrorlist" || exit 1
+) || fail "a SmartRoom edge image does not install the settings package's pacman template"
+pass "a SmartRoom edge image installs the settings package's edge pacman template"
+
 # Base runtime requests must resolve to the same reviewed stack as Apple requests.
 (
   candidates=$scratch/runtime-inputs

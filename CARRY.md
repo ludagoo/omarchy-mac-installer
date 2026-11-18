@@ -16,6 +16,13 @@ cleanly onto the pin. The package name
 `aura` stays in `policy.json`'s refused list. The builder allows it only when
 the resolved package comes from the SmartRoom repo.
 
+A SmartRoom image does not install `omarchy-settings`, and the helpers
+package only carries the stable pacman template. On edge, the installed
+`/etc/pacman.conf` is the edge template from the settings package the build
+already accepted (`aarch64-apple/pacman-edge.conf` and its mirror list).
+A template already on the root still wins, so a stable image keeps the
+helpers' stable files.
+
 The pinned Engine enrolls a **raw** first stage (`kmutil configure-boot --raw
 --entry-point 2048`). It overwrites asahi's m1n1 stage 1 with
 `esp/aurora/stage1.bin` only when `installer_data.json` carries
