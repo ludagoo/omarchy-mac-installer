@@ -23,8 +23,17 @@ packages=(smartroom-omarchy-helpers omarchy-mac-boot smartroom-boot-os)
 # .pkg.tar.zst files, is copied in instead of compiling them again.
 if [[ -d $src/pkgs/smartroom/pkgbuilds/aura ]]; then
   if [[ -n ${SMARTROOM_EDGE_BOOT_PACKAGES:-} ]]; then
-    cp -a "$SMARTROOM_EDGE_BOOT_PACKAGES"/*.pkg.tar.zst "$SMARTROOM_EDGE_BOOT_PACKAGES"/*.pkg.tar.zst.sig "$out/repo/"
-    [[ -n $(ls "$out/repo"/aura-*.pkg.tar.zst "$out/repo"/linux-aurora-*.pkg.tar.zst 2>/dev/null) ]] ||
+    # studio-build's makepkg.conf compresses with xz unless a build overrides it.
+    # Accept either archive. Signatures use the same suffix plus .sig.
+    shopt -s nullglob
+    boot_archives=("$SMARTROOM_EDGE_BOOT_PACKAGES"/*.pkg.tar.zst "$SMARTROOM_EDGE_BOOT_PACKAGES"/*.pkg.tar.xz)
+    boot_sigs=("$SMARTROOM_EDGE_BOOT_PACKAGES"/*.pkg.tar.zst.sig "$SMARTROOM_EDGE_BOOT_PACKAGES"/*.pkg.tar.xz.sig)
+    (( ${#boot_archives[@]} && ${#boot_sigs[@]} )) || { echo "SMARTROOM_EDGE_BOOT_PACKAGES has no packages" >&2; exit 1; }
+    cp -a "${boot_archives[@]}" "${boot_sigs[@]}" "$out/repo/"
+    found_aura=("${out}/repo"/aura-*.pkg.tar.zst "${out}/repo"/aura-*.pkg.tar.xz)
+    found_kernel=("${out}/repo"/linux-aurora-*.pkg.tar.zst "${out}/repo"/linux-aurora-*.pkg.tar.xz)
+    shopt -u nullglob
+    (( ${#found_aura[@]} && ${#found_kernel[@]} )) ||
       { echo "SMARTROOM_EDGE_BOOT_PACKAGES has no aura and linux-aurora packages" >&2; exit 1; }
   else
     packages+=(aura linux-aurora)
