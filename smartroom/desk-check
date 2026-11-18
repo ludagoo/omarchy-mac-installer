@@ -70,6 +70,19 @@ fi
 check "sudoers and sudoers.d parse, with the owner and mode sudo requires" chroot "$m" visudo -c -q
 if [[ -e $m/etc/omarchy-mac-boot/headless ]]; then
   echo "== SmartRoom image"
+  # This branch is the edge image. The enrolled first stage is the payload's
+  # esp/aurora/stage1.bin (the Engine fills it into the stub). The ESP's
+  # m1n1/boot.bin is aura's second stage. m1n1's raw image has the config
+  # magic too, so the marker string is the check. The copy at
+  # aurora/stage1.bin on the ESP is not what 1TR enrolls.
+  aura_check=$(dirname -- "${BASH_SOURCE[0]}")/../image-builder/builder/aura_stage1.py
+  check "kernel is 7.3 (edge)" bash -c '[[ $1 == 7.3.*-ARCH ]]' _ "$kver"
+  check "aura stage 1 in the payload (aura-try, one config block, STACKBOT)" \
+    python3 "$aura_check" stage1 "$work/x/esp/aurora/stage1.bin"
+  check "aura stage 2 on the ESP (m1n1/boot.bin carries aura-try)" \
+    python3 "$aura_check" stage2 "$work/x/esp/m1n1/boot.bin"
+  esp_bytes=$(find "$work/x/esp" -type f -printf '%s\n' | awk '{ s += $1 } END { print s + 0 }')
+  echo "ESP tree bytes: $esp_bytes of 524288000"
   nm=$m/etc/NetworkManager/system-connections/smartroom-wired.nmconnection
   check "wired profile present (AQC113 needs accept-all-mac-addresses)" test -f "$nm"
   check "wired profile is root's, mode 0600 (NetworkManager ignores it otherwise)" test "$(stat -c '%u:%g %a' "$nm" 2>/dev/null)" = "0:0 600"

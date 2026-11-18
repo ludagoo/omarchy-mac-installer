@@ -1,7 +1,37 @@
 # SmartRoom carry on omarchy-mac-installer
 
-`smartroom/main` is what SmartRoom Firmware builds and installs its Mac Studio
-image with: omacom's `main` (mirrored here as `main`, fast-forward only) plus
+`smartroom/edge` (this branch) is `smartroom/main` at `ea01d43` plus the edge
+boot chain. `smartroom/main` stays the stable line: m1n1-aurora, kernel 7.2,
+the smartroom-3 image. Do not merge this branch back into `smartroom/main`.
+
+On this branch the SmartRoom image is built from the Omarchy **edge** channel,
+not stable. The channel's published edge database (2026-11-18) is still kernel
+7.2.11 and m1n1-aurora. Kernel 7.3 and aura-as-bootloader exist only on the
+draft pin omarchy-pkgs#3025 (`1102a177`, branch `pin/edgeB2`). This image
+therefore installs `aura` and `linux-aurora` from the signed SmartRoom repo,
+in place of the channel's `m1n1-aurora` and `linux-aurora`. The kernel
+package is ludagoo/linux `b6d00c75` (7.3.0 plus the t6021 encoder stack),
+not omacom/linux-aurora `4454eda`: those encoder commits do not cherry-pick
+cleanly onto the pin. The package name
+`aura` stays in `policy.json`'s refused list. The builder allows it only when
+the resolved package comes from the SmartRoom repo.
+
+The pinned Engine enrolls a **raw** first stage (`kmutil configure-boot --raw
+--entry-point 2048`). It overwrites asahi's m1n1 stage 1 with
+`esp/aurora/stage1.bin` only when `installer_data.json` carries
+`aurora_stage1.kind = common-raw-v1` and lists that Mac. This image qualifies
+`j475cap` on OS firmware `13.5` only. The next object stays `m1n1/boot.bin`.
+Stage 2 on the ESP is aura's `ESP_STAGE2` build, concatenated the way
+`update-m1n1` already concatenates `usr/lib/asahi-boot/m1n1.bin`. Desk-check
+requires the string `aura-try` in both, because m1n1-aurora also ships a file
+at `usr/share/aura/stage1/aura-raw.bin` and that file is m1n1.
+
+Zero-touch settings (Limine checksums off, `panic=10`) and the disk-split
+default (macOS keeps its minimum + 20 GiB when the install shrinks macOS)
+come along from `smartroom/main`. They are unchanged here.
+
+`smartroom/main` is what a stable SmartRoom Firmware image builds with:
+omacom's `main` (mirrored here as `main`, fast-forward only) plus
 the patches below, rebased, never merged. The bottom layers are Omarchy's,
 copied, and changed only where a headless room needs it: the image builder,
 the Engine, omarchy-mac-boot (from ludagoo/omarchy-mac-pkgs `smartroom/main`)

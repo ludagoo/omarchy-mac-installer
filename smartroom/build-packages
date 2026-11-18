@@ -17,7 +17,20 @@ git -C "$src/pkgs" checkout -q "${commit:-origin/smartroom/main}"
 commit=$(git -C "$src/pkgs" rev-parse HEAD)
 date=$(TZ=UTC0 git -C "$src/pkgs" show -s --format=%cd --date=format-local:%Y%m%d HEAD)
 mkdir -p "$out/repo"
-for pkg in smartroom-omarchy-helpers omarchy-mac-boot smartroom-boot-os; do
+packages=(smartroom-omarchy-helpers omarchy-mac-boot smartroom-boot-os)
+# The edge branch also builds aura and linux-aurora into this repo. They are
+# long compiles. SMARTROOM_EDGE_BOOT_PACKAGES, a directory of already-built
+# .pkg.tar.zst files, is copied in instead of compiling them again.
+if [[ -d $src/pkgs/smartroom/pkgbuilds/aura ]]; then
+  if [[ -n ${SMARTROOM_EDGE_BOOT_PACKAGES:-} ]]; then
+    cp -a "$SMARTROOM_EDGE_BOOT_PACKAGES"/*.pkg.tar.zst "$SMARTROOM_EDGE_BOOT_PACKAGES"/*.pkg.tar.zst.sig "$out/repo/"
+    [[ -n $(ls "$out/repo"/aura-*.pkg.tar.zst "$out/repo"/linux-aurora-*.pkg.tar.zst 2>/dev/null) ]] ||
+      { echo "SMARTROOM_EDGE_BOOT_PACKAGES has no aura and linux-aurora packages" >&2; exit 1; }
+  else
+    packages+=(aura linux-aurora)
+  fi
+fi
+for pkg in "${packages[@]}"; do
   cp -a "$src/pkgs/smartroom/pkgbuilds/$pkg" "$src/$pkg"
   (cd "$src/$pkg" && SMARTROOM_MAC_PKGS_COMMIT=$commit SMARTROOM_MAC_PKGS_DATE=$date \
     PKGDEST="$out/repo" makepkg --force --cleanbuild --syncdeps --noconfirm --sign --key "$key")

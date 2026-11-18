@@ -378,6 +378,9 @@ apple_names=()
 lane=""
 test_image_pin=""
 profile=release
+# Set by stage_board_boot_payloads when the SmartRoom repo's aura package
+# supplied the raw first stage. write_installer_data reads it.
+AURA_FIRST_STAGE=0
 lab_access_dir=/lab-access
 smartroom_dir=/smartroom
 # The OS name the Mac's startup picker, the stub volume and the Limine entry show.
@@ -837,6 +840,15 @@ runtime_lists() {
 qualified() {
   local name package replacement
   for name in "$@"; do
+    # The boot package in the channel set is still named m1n1-aurora. On the
+    # edge image the SmartRoom repo ships aura under its own name, and that
+    # package provides m1n1. Match the name before the generic repo check:
+    # "aura" is not "m1n1-aurora", so the check below would miss it.
+    if [[ $profile == smartroom && $name == m1n1-aurora && -f $work/smartroom-names ]] &&
+      grep -Fxq aura "$work/smartroom-names"; then
+      printf 'smartroom/aura\n'
+      continue
+    fi
     if [[ $profile == smartroom ]] && grep -Fxq "$name" "$work/smartroom-names"; then
       printf 'smartroom/%s\n' "$name"
       continue
@@ -902,6 +914,17 @@ precheck_transaction() {
     grep -Eq "^omarchy-candidates $name " <<<"$resolved" || fail "$name does not resolve from the candidate set"
   done < <(jq -r '.packages[].name' "$candidates/import.json")
   for refused in $(jq -r '.refused_packages[]' "$ROOT/builder/candidate-trust/policy.json"); do
+    # policy.json refuses the name aura because the published channel package
+    # is the old 0.1.0 loader, which the installer will not enroll. The edge
+    # image installs aura only from the SmartRoom repo, and still refuses the
+    # channel's copy.
+    if [[ $profile == smartroom && $refused == aura && -f $work/smartroom-names ]] &&
+      grep -Fxq aura "$work/smartroom-names"; then
+      if grep -Eq '^(omarchy-candidates|omarchy) aura ' <<<"$resolved"; then
+        fail "the package set pulls in the channel aura, not the SmartRoom aura"
+      fi
+      continue
+    fi
     ! grep -Eq "^[^ ]+ $refused " <<<"$resolved" || fail "the package set pulls in the refused $refused"
   done
 }
@@ -919,6 +942,11 @@ runtime_roles() {
 candidate_installed() {
   [[ $profile == smartroom ]] || return 0
   case $1 in omarchy | omarchy-settings | omarchy-dev | omarchy-settings-dev) return 1 ;; esac
+  # aura replaces m1n1-aurora by name. The channel package stays in the set
+  # and is recorded as not installed.
+  if [[ $1 == m1n1-aurora && -f $work/smartroom-names ]] && grep -Fxq aura "$work/smartroom-names"; then
+    return 1
+  fi
   ! grep -Fxq "$1" "$work/smartroom-names" &&
     ! awk 'NF && $1 !~ /^#/ { print $1 }' "$smartroom_dir/apple-drop" | grep -Fxq "$1"
 }
@@ -1464,14 +1492,33 @@ stage_recovery_app() {
     fail "could not stage the pinned Recovery app"
 }
 
-# Board payloads come from the same authenticated m1n1-aurora package as Stage 2.
-# The engine's per-board contract (BOARD_STAGE1, BOARD_STAGE2): the MacBook
-# Neo boots its raw Stage 1 as esp/aurora/stage1-j700.bin and takes
-# esp/m1n1/boot-j700.bin, the same bundle as m1n1/boot.bin, in its place.
-# Every other Mac drops boot-j700.bin.
+# Board payloads. The MacBook Neo still gets esp/aurora/stage1-j700.bin and
+# esp/m1n1/boot-j700.bin (the same bundle as m1n1/boot.bin). Every other Mac
+# drops boot-j700.bin.
+# When the SmartRoom repo ships aura, the raw first stage is aura's, copied
+# to esp/aurora/stage1.bin as well. The pinned Engine enrolls that file only
+# for a board the installer_data contract names (write_installer_data). The
+# published m1n1-aurora package also fills usr/share/aura/stage1/aura-raw.bin
+# with a copy of m1n1, so the bytes have to contain aura-try or this stops.
 stage_board_boot_payloads() {
-  local stage1="$target/usr/share/m1n1-aurora/stage1/m1n1-raw.bin"
-  local stage2="$target/boot/efi/m1n1/boot.bin"
+  local stage1 stage2="$target/boot/efi/m1n1/boot.bin"
+  AURA_FIRST_STAGE=0
+  if [[ $profile == smartroom && -f $work/smartroom-names ]] && grep -Fxq aura "$work/smartroom-names"; then
+    stage1=$target/usr/share/aura/stage1/aura-raw.bin
+    [[ -s $stage1 && ! -L $stage1 && -s $stage2 && ! -L $stage2 ]] ||
+      fail "the edge image lacks aura Stage 1 (usr/share/aura/stage1/aura-raw.bin) or Stage 2"
+    python3 "$ROOT/builder/aura_stage1.py" stage1 "$stage1" ||
+      fail "usr/share/aura/stage1/aura-raw.bin is not an aura first stage (it needs aura-try, one config block and STACKBOT). m1n1-aurora's copy of this path is m1n1 and must not be enrolled"
+    python3 "$ROOT/builder/aura_stage1.py" stage2 "$stage2" ||
+      fail "the ESP Stage 2 is not aura (no aura-try string in m1n1/boot.bin)"
+    mkdir -p "$target/boot/efi/aurora" "$target/boot/efi/m1n1"
+    install -m 0644 "$stage1" "$target/boot/efi/aurora/stage1.bin"
+    install -m 0644 "$stage1" "$target/boot/efi/aurora/stage1-j700.bin"
+    install -m 0644 "$stage2" "$target/boot/efi/m1n1/boot-j700.bin"
+    AURA_FIRST_STAGE=1
+    return 0
+  fi
+  stage1="$target/usr/share/m1n1-aurora/stage1/m1n1-raw.bin"
   [[ -s $stage1 && ! -L $stage1 && -s $stage2 && ! -L $stage2 ]] ||
     fail "the image lacks matched m1n1-aurora Stage 1 and Stage 2 payloads for the MacBook Neo"
   mkdir -p "$target/boot/efi/aurora" "$target/boot/efi/m1n1"
@@ -1763,9 +1810,18 @@ payload_name() {
 }
 
 write_installer_data() {
+  # j475cap on macOS 13.5 only: the room model and the home Studio. The raw
+  # binary would boot other M1-M3 machines too, but a bad first stage needs
+  # another 1TR visit, so this image does not qualify a board it has not
+  # decided to enroll. Other Macs in the same payload keep asahi's stage 1.
+  local aura_contract='{}'
+  if [[ ${AURA_FIRST_STAGE:-} == 1 ]]; then
+    aura_contract='{"aurora_stage1":{"kind":"common-raw-v1","qualified_machines":{"j475cap":["13.5"]}}}'
+  fi
   jq -S -n --arg package "$1" --argjson esp "$ESP_SIZE" --argjson boot "$BOOT_SIZE" --argjson root "$ROOT_SIZE" \
     --arg volume_id "$ESP_VOLUME_ID" --arg os_name "$OS_NAME" \
     --arg recovery_app_manifest "$(field recovery_app_manifest_sha256)" \
+    --argjson aura "$aura_contract" \
     --args '{os_list: [{
       name: $os_name, default_os_name: $os_name, omarchy_target: "apple-silicon-full-os",
       boot_object: "m1n1.bin", next_object: "m1n1/boot.bin", package: $package, icon: "omarchy-volume.icns",
@@ -1775,7 +1831,8 @@ write_installer_data() {
           copy_firmware: true, copy_installer_data: true, source: "esp"},
         {name: "Boot", type: "Linux", size: "\($boot)B", image: "boot.img"},
         {name: "Root", type: "Linux", size: "\($root)B", expand: true, image: "root.img"}]}
-      + (if $recovery_app_manifest != "" then {recovery_gui: "omarchy-native-v1"} else {} end)]}' \
+      + (if $recovery_app_manifest != "" then {recovery_gui: "omarchy-native-v1"} else {} end)
+      + $aura]}' \
     "${SUPPORTED_FW[@]}" >"$2"
 }
 

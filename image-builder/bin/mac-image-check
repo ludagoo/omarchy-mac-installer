@@ -144,15 +144,26 @@ def require(condition: bool, message: str) -> None:
         raise CheckError(message)
 
 
-def expected_metadata(package: str, native_recovery: bool = False, os_name: str = "Omarchy") -> dict:
+def expected_metadata(package: str, native_recovery: bool = False, os_name: str = "Omarchy",
+                       aura_first_stage: bool = False) -> dict:
     """The one Omarchy target every Mac installs: no board restriction (the
     catalog and the engine refuse the Macs it does not support), and every
     Mac's OS firmware, of which the engine's per-device table picks each
-    Mac's."""
+    Mac's.
+
+    aura_first_stage is only for a SmartRoom edge payload that carries
+    esp/aurora/stage1.bin. It qualifies the raw aura first stage for a
+    j475c Mac Studio on macOS 13.5 and for nothing else."""
     return {
         "os_list": [
             {
                 **({"recovery_gui": "omarchy-native-v1"} if native_recovery else {}),
+                **({
+                    "aurora_stage1": {
+                        "kind": "common-raw-v1",
+                        "qualified_machines": {"j475cap": ["13.5"]},
+                    }
+                } if aura_first_stage else {}),
                 "boot_object": "m1n1.bin",
                 "default_os_name": os_name,
                 "icon": ICON,
@@ -247,7 +258,18 @@ def check_payload(lane: str, package: Path, installer_data: Path, profile: str =
     native_recovery = metadata.get("os_list", [{}])[0].get("recovery_gui") == "omarchy-native-v1"
     require(recovery_digest is None or native_recovery == bool(recovery_digest),
             "Recovery metadata does not match the pinned inputs")
-    require(metadata == expected_metadata(name, native_recovery, os_name), f"{installer_data} is not the installer_data for {name}")
+    # A SmartRoom edge payload names its aura first stage by shipping the
+    # file. Payloads without it (stock, and a stable SmartRoom image) keep
+    # the old metadata. Opening the zip here only looks at names.
+    aura_first_stage = False
+    if profile == "smartroom":
+        try:
+            with zipfile.ZipFile(package) as probe:
+                aura_first_stage = "esp/aurora/stage1.bin" in probe.namelist()
+        except (OSError, zipfile.BadZipFile):
+            aura_first_stage = False
+    require(metadata == expected_metadata(name, native_recovery, os_name, aura_first_stage),
+            f"{installer_data} is not the installer_data for {name}")
 
     try:
         archive = zipfile.ZipFile(package)
@@ -315,6 +337,16 @@ def check_payload(lane: str, package: Path, installer_data: Path, profile: str =
                 "the J700 Stage 1 has an invalid configuration block")
         require(archive.read("esp/m1n1/boot-j700.bin") == archive.read("esp/m1n1/boot.bin"),
                 "the J700 Stage 2 differs from the common bundle")
+        if aura_first_stage:
+            checker = Path(__file__).resolve().parents[1] / "builder" / "aura_stage1.py"
+            spec = importlib.util.spec_from_file_location("aura_stage1", checker)
+            aura_stage1 = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(aura_stage1)
+            require(aura_stage1.stage1_ok(archive.read("esp/aurora/stage1.bin")),
+                    "esp/aurora/stage1.bin is not an aura first stage (aura-try, one config block, STACKBOT)")
+            with archive.open("esp/m1n1/boot.bin") as stage2:
+                require(aura_stage1.stream_contains(stage2, b"aura-try"),
+                        "esp/m1n1/boot.bin is not an aura second stage")
 
         keep = {
             "boot.img": 0x488,

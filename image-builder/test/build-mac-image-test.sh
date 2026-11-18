@@ -1047,6 +1047,44 @@ fi
 ) || fail "the J700 boot payloads are missing or mismatched"
 pass "every image stages matched J700 board payloads from the canonical Stage 1 and rejects a missing one"
 
+# The edge SmartRoom image enrolls aura's raw stage 1, and refuses m1n1's
+# copy of the aura-raw.bin path. Stock images (profile release, no aura in
+# the SmartRoom repo) keep the path above.
+(
+  profile=smartroom
+  work=$scratch/aura-work
+  target=$scratch/aura-target
+  mkdir -p "$work" "$target/usr/share/aura/stage1" "$target/usr/share/m1n1-aurora/stage1" "$target/boot/efi/m1n1"
+  printf 'aura\nlinux-aurora\n' >"$work/smartroom-names"
+  [[ $(qualified m1n1-aurora linux-aurora | paste -sd' ' -) == "smartroom/aura smartroom/linux-aurora" ]] || exit 1
+  candidate_installed m1n1-aurora && exit 1
+  python3 "$here/builder/aura_stage1.py" --write-fixture "$target/usr/share/aura/stage1/aura-raw.bin"
+  printf 'assembled stage 2 with aura-try inside\n' >"$target/boot/efi/m1n1/boot.bin"
+  printf 'm1n1 raw that must not be enrolled\n' >"$target/usr/share/m1n1-aurora/stage1/m1n1-raw.bin"
+  stage_board_boot_payloads
+  [[ $AURA_FIRST_STAGE == 1 ]] || exit 1
+  cmp "$target/usr/share/aura/stage1/aura-raw.bin" "$target/boot/efi/aurora/stage1.bin" || exit 1
+  cmp "$target/usr/share/aura/stage1/aura-raw.bin" "$target/boot/efi/aurora/stage1-j700.bin" || exit 1
+  cmp "$target/boot/efi/m1n1/boot.bin" "$target/boot/efi/m1n1/boot-j700.bin" || exit 1
+  python3 "$here/builder/aura_stage1.py" --write-m1n1-fixture "$target/usr/share/aura/stage1/aura-raw.bin"
+  if (fail() { builder_fail "$@"; }; stage_board_boot_payloads) >/dev/null 2>&1; then
+    exit 1
+  fi
+  field() { :; }
+  AURA_FIRST_STAGE=1
+  OS_NAME="SmartRoom Firmware"
+  write_installer_data smartroom-firmware-test.zip "$scratch/aura-installer-data.json"
+  python3 - "$scratch/aura-installer-data.json" <<'PY' || exit 1
+import json, sys
+data = json.load(open(sys.argv[1]))
+os = data["os_list"][0]
+assert os["boot_object"] == "m1n1.bin" and os["next_object"] == "m1n1/boot.bin"
+assert os["aurora_stage1"] == {"kind": "common-raw-v1", "qualified_machines": {"j475cap": ["13.5"]}}
+assert "j475dap" not in os["aurora_stage1"]["qualified_machines"]
+PY
+) || fail "the edge image does not enroll an aura first stage for j475cap only"
+pass "an aura package in the SmartRoom repo stages aura stage 1 and qualifies only j475cap on 13.5"
+
 # Base runtime requests must resolve to the same reviewed stack as Apple requests.
 (
   candidates=$scratch/runtime-inputs

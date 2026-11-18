@@ -40,11 +40,18 @@ git -C "$dir/fw" archive HEAD bin configs overlay studio-install/firstboot.sh \
   builder/packages-target.aarch64 builder/image/rootfs | tar -x -C "$dir/setup/firmware"
 printf '%s\n' "$firmware" >"$dir/setup/firmware/COMMIT"
 version=$(date -u +%Y.%m.%d)
+channel=$(sed -n 's/^omarchy_channel=//p' "$inputs")
+release=$(sed -n 's/^release_tag=//p' "$inputs")
 {
-  printf 'built_at=%s\niso_version=%s\nbase=omarchy-mac stable (%s)\n' "$(date -u +%FT%TZ)" "$version" "$(sed -n 's/^release_tag=//p' "$inputs")"
+  printf 'built_at=%s\niso_version=%s\nbase=omarchy-mac %s (%s)\n' \
+    "$(date -u +%FT%TZ)" "$version" "${channel:-unknown}" "${release:-no release tag}"
   printf 'installer_fork=%s\nfirmware_git=%s\n' "$(git -C "$here" rev-parse HEAD)" "$firmware"
   cat "$packages/SOURCE"
-  printf 'bootloader=limine\n'
+  if bsdtar -tf "$packages/repo/smartroom.db" | grep -q '/aura-[^/]*/desc$'; then
+    printf 'bootloader=aura stage 1 enrolled for j475cap on 13.5, aura stage 2 on the ESP, Limine still loads the UKI\n'
+  else
+    printf 'bootloader=limine\n'
+  fi
 } >"$dir/setup/build-info"
 # Our packages keep their version across same-day rebuilds: never let the
 # package cache hand pacman an older build under the same file name.
