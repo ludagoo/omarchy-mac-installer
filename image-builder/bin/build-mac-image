@@ -1324,10 +1324,9 @@ apply_smartroom() {
   [[ $profile == smartroom ]] || return 0
   install -d -m 0755 "$target/etc/omarchy-mac-boot"
   : >"$target/etc/omarchy-mac-boot/headless"
-  # Zero-touch boot: with Limine's file checksums on, a kernel file that changes
-  # after limine.conf was written stops the boot at "Press Y to continue" (or a
-  # panic prompt) forever. A room has no keyboard or screen to answer it.
-  printf 'TARGET_OS_NAME="%s"\nENABLE_VERIFICATION=no\n' "$OS_NAME" >"$target/etc/default/limine"
+  # limine-boot.sh reads TARGET_OS_NAME here, then rewrites this file and keeps
+  # only that name. Anything else written here is gone after first boot.
+  printf 'TARGET_OS_NAME="%s"\n' "$OS_NAME" >"$target/etc/default/limine"
   rm -rf "$target/var/tmp/smartroom-setup"
   # The setup tree belongs to the host's build user (uid 1000, which is the
   # room's own user in the image): what it installs must be root's.
@@ -1336,6 +1335,29 @@ apply_smartroom() {
   isolated_chroot "$target" env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/bin HOME=/root TERM=dumb LANG=C.UTF-8 \
     /var/tmp/smartroom-setup/run >>"$logs/smartroom-setup.log" 2>&1 || fail "the SmartRoom setup stopped (logs/smartroom-setup.log)"
   rm -rf "$target/var/tmp/smartroom-setup"
+  # After the room layer: it does not install this directory (overlay-exclude).
+  # Checksums off, where first boot cannot wipe them. limine-entry-tool loads
+  # /etc/limine-entry-tool.conf (ENABLE_VERIFICATION=yes) and then this
+  # directory, and only then /etc/default/limine. A mismatch with checksums on
+  # waits at "Press Y to continue" or a panic prompt. A room has neither.
+  install -d -m 0755 "$target/etc/limine-entry-tool.d"
+  cat >"$target/etc/limine-entry-tool.d/zz-smartroom-firmware.conf" <<'EOF'
+# Loads after /etc/limine-entry-tool.conf and before /etc/default/limine.
+# First boot rewrites /etc/default/limine and keeps only TARGET_OS_NAME.
+ENABLE_VERIFICATION=no
+EOF
+  chmod 0644 "$target/etc/limine-entry-tool.d/zz-smartroom-firmware.conf"
+  # Reboot 10s after a kernel panic. The UKI line is derived from this file;
+  # grub-console.sh rewrites GRUB_CMDLINE_LINUX and leaves this line alone.
+  local grub=$target/etc/default/grub
+  [[ -f $grub ]] || fail "the image has no /etc/default/grub to carry panic=10"
+  if ! grep -Eq '^GRUB_CMDLINE_LINUX_DEFAULT="(.*[[:space:]])?panic=10([[:space:]].*)?"$' "$grub"; then
+    grep -q '^GRUB_CMDLINE_LINUX_DEFAULT="' "$grub" ||
+      fail "GRUB_CMDLINE_LINUX_DEFAULT is missing; panic=10 has nowhere to go"
+    sed -i 's/^GRUB_CMDLINE_LINUX_DEFAULT="\(.*\)"/GRUB_CMDLINE_LINUX_DEFAULT="\1 panic=10"/' "$grub"
+  fi
+  grep -Eq '^GRUB_CMDLINE_LINUX_DEFAULT="(.*[[:space:]])?panic=10([[:space:]].*)?"$' "$grub" ||
+    fail "panic=10 did not reach the kernel command line"
 }
 
 sealed_body() {

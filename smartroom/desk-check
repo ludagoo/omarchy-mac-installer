@@ -77,8 +77,18 @@ if [[ -e $m/etc/omarchy-mac-boot/headless ]]; then
     test "$(awk '/^\[/ { s = $0 } s == "[ethernet]" && $0 == "accept-all-mac-addresses=1" { print "yes" }' "$nm" 2>/dev/null)" = yes
   check "sudoers.d/smartroomcontroller root's, 0440" test "$(stat -c '%u:%g %a' "$m/etc/sudoers.d/smartroomcontroller" 2>/dev/null)" = "0:0 440"
   check "Limine name: TARGET_OS_NAME=\"SmartRoom Firmware\"" grep -qx 'TARGET_OS_NAME="SmartRoom Firmware"' "$m/etc/default/limine"
-  check "Limine file checksums off: ENABLE_VERIFICATION=no (a mismatch waits for a keypress)" grep -qx 'ENABLE_VERIFICATION=no' "$m/etc/default/limine"
+  # The leaf rewrites /etc/default/limine at first boot and keeps only the OS
+  # name. The checksum switch has to be the drop-in, which that rewrite does
+  # not touch, and the defaults file must not turn checksums back on.
+  check "Limine file checksums off, where first boot leaves it: etc/limine-entry-tool.d/zz-smartroom-firmware.conf" \
+    grep -qx 'ENABLE_VERIFICATION=no' "$m/etc/limine-entry-tool.d/zz-smartroom-firmware.conf"
+  check "Limine defaults do not turn file checksums back on" \
+    bash -c '! grep -qx "ENABLE_VERIFICATION=yes" "$1"' _ "$m/etc/default/limine"
   check "Limine entries carry no checksum" bash -c '! grep -qE "^ *[a-z_]*path: .*#[0-9a-f]{128}" "$1"' _ "$m/boot/efi/limine.conf"
+  check "panic=10 survives in /etc/default/grub (GRUB_CMDLINE_LINUX_DEFAULT)" \
+    grep -Eq '^GRUB_CMDLINE_LINUX_DEFAULT="(.*[[:space:]])?panic=10([[:space:]].*)?"$' "$m/etc/default/grub"
+  check "panic=10 is on the Limine command line the UKI boots" \
+    bash -c 'printf "%s\n" "$1" | grep -Eq "(^|[[:space:]])panic=10([[:space:]]|$)"' _ "$cmdline"
   meta=$(dirname -- "$zip")/installer_data.json
   if [[ -f $meta ]]; then
     check "picker and stub name: installer_data.json says SmartRoom Firmware" \
