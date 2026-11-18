@@ -77,6 +77,8 @@ if [[ -e $m/etc/omarchy-mac-boot/headless ]]; then
     test "$(awk '/^\[/ { s = $0 } s == "[ethernet]" && $0 == "accept-all-mac-addresses=1" { print "yes" }' "$nm" 2>/dev/null)" = yes
   check "sudoers.d/smartroomcontroller root's, 0440" test "$(stat -c '%u:%g %a' "$m/etc/sudoers.d/smartroomcontroller" 2>/dev/null)" = "0:0 440"
   check "Limine name: TARGET_OS_NAME=\"SmartRoom Firmware\"" grep -qx 'TARGET_OS_NAME="SmartRoom Firmware"' "$m/etc/default/limine"
+  check "Limine file checksums off: ENABLE_VERIFICATION=no (a mismatch waits for a keypress)" grep -qx 'ENABLE_VERIFICATION=no' "$m/etc/default/limine"
+  check "Limine entries carry no checksum" bash -c '! grep -qE "^ *[a-z_]*path: .*#[0-9a-f]{128}" "$1"' _ "$m/boot/efi/limine.conf"
   meta=$(dirname -- "$zip")/installer_data.json
   if [[ -f $meta ]]; then
     check "picker and stub name: installer_data.json says SmartRoom Firmware" \

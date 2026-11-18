@@ -1324,7 +1324,10 @@ apply_smartroom() {
   [[ $profile == smartroom ]] || return 0
   install -d -m 0755 "$target/etc/omarchy-mac-boot"
   : >"$target/etc/omarchy-mac-boot/headless"
-  printf 'TARGET_OS_NAME="%s"\n' "$OS_NAME" >"$target/etc/default/limine"
+  # Zero-touch boot: with Limine's file checksums on, a kernel file that changes
+  # after limine.conf was written stops the boot at "Press Y to continue" (or a
+  # panic prompt) forever. A room has no keyboard or screen to answer it.
+  printf 'TARGET_OS_NAME="%s"\nENABLE_VERIFICATION=no\n' "$OS_NAME" >"$target/etc/default/limine"
   rm -rf "$target/var/tmp/smartroom-setup"
   # The setup tree belongs to the host's build user (uid 1000, which is the
   # room's own user in the image): what it installs must be root's.
