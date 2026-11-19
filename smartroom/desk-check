@@ -100,6 +100,43 @@ sys.exit(open(sys.argv[2], "rb").read() not in open(sys.argv[1], "rb").read())' 
     check "j475c device tree: encoder auxiliary DMA $node disabled" \
       test "$(fdtget -t s "$j475c" "/soc/$node" status 2>/dev/null)" = disabled
   done
+  # The SMC sensor tree: the driver discovers the temperature keys only when
+  # the tree lists no temperature channel of its own, so TH0x must be gone.
+  hwmon=/soc/smc@2a2400000/hwmon
+  echo "j475c SMC hwmon: $(fdtget -l "$j475c" "$hwmon" 2>/dev/null | paste -sd' ' -)"
+  check "j475c device tree: SMC hwmon discovers temperatures" fdtget "$j475c" "$hwmon" apple,discover-temperatures
+  check "j475c device tree: no shared temperature-TH0x channel" \
+    bash -c '! fdtget -l "$1" "$2" | grep -q "^temperature-"' _ "$j475c" "$hwmon"
+  check "j475c device tree: thermal pressure key mTPL" \
+    test "$(fdtget -t s "$j475c" "$hwmon" apple,thermal-pressure-key 2>/dev/null)" = mTPL
+  for key in PHPC PSVR PSVC PPSR PPMC PC10 PC12 PC20 PC22; do
+    check "j475c device tree: SMC power key $key" \
+      test "$(fdtget -t s "$j475c" "$hwmon/power-$key" apple,key-id 2>/dev/null)" = "$key"
+  done
+  ave_ko=$(find "$m/usr/lib/modules/$kver" -name 'apple-ave.ko*' 2>/dev/null | head -n 1)
+  echo "apple-ave module: ${ave_ko#"$m"}"
+  check "apple-ave usage counter in the kernel (busy_ns, active_sessions, frames attributes)" bash -c '
+    case $1 in
+      *.zst) d="zstd -dc" ;; *.xz) d="xz -dc" ;; *.gz) d="gzip -dc" ;; *) d=cat ;;
+    esac
+    s=$($d "$1" | strings -a)
+    for a in busy_ns active_sessions frames; do grep -qx "$a" <<<"$s" || exit 1; done' _ "$ave_ko"
+  hypr=$m/etc/skel/.config/hypr
+  check "cursor invisible in hyprland.conf (etc/skel)" awk '
+    /^[[:space:]]*cursor[[:space:]]*\{/ { s = 1; next }
+    s && /^[[:space:]]*\}/ { s = 0 }
+    s && /^[[:space:]]*invisible[[:space:]]*=[[:space:]]*true[[:space:]]*$/ { found = 1 }
+    END { exit !found }' "$hypr/hyprland.conf"
+  check "cursor invisible in hyprland.lua (etc/skel)" \
+    grep -Eq '^[[:space:]]*cursor[[:space:]]*=[[:space:]]*\{[^}]*invisible[[:space:]]*=[[:space:]]*true' "$hypr/hyprland.lua"
+  browser=$(awk '$1 ~ /chromium/ { print $1; exit }' "$(dirname -- "${BASH_SOURCE[0]}")/room/packages")
+  echo "browser packages: $(cd "$m/var/lib/pacman/local" && ls -d *chromium* 2>/dev/null | paste -sd' ' -)"
+  check "room browser $browser installed (room/packages)" test -n "$(ls -d "$m/var/lib/pacman/local/$browser"-[0-9]* 2>/dev/null)"
+  for other in chromium chromium-smartroom omarchy-chromium-bin; do
+    [[ $other == "$browser" ]] && continue
+    check "not installed: $other (the room browser is $browser)" test -z "$(ls -d "$m/var/lib/pacman/local/$other"-[0-9]* 2>/dev/null)"
+  done
+  check "/usr/bin/chromium is executable (the agent looks for it there)" chroot "$m" test -x /usr/bin/chromium
   esp_bytes=$(find "$work/x/esp" -type f -printf '%s\n' | awk '{ s += $1 } END { print s + 0 }')
   echo "ESP tree bytes: $esp_bytes of 524288000"
   nm=$m/etc/NetworkManager/system-connections/smartroom-wired.nmconnection

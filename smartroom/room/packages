@@ -15,7 +15,7 @@ hyprland                 # kiosk compositor (Omarchy's build)
 aquamarine               # Omarchy's patched aquamarine
 hyprland-guiutils        # hyprland dep
 hyprtoolkit              # hyprland-guiutils dep
-omarchy-chromium-bin     # Omarchy's Chromium
+chromium-smartroom       # room browser, direct V4L2 decode and encode (room/prebuilt.sha256)
 libva                    # VA-API for Chromium decode
 ffmpeg                   # software encode for previews
 greetd                   # passwordless autologin, no greeter UI

@@ -6,7 +6,12 @@
 # signed with the local SmartRoom package key (SMARTROOM_PKG_KEY, a gpg
 # fingerprint in the builder's keyring; its secret never leaves the build host).
 # OUT gets repo/ (packages, signatures, smartroom.db), key.asc and key.fpr.
+#
+# The files smartroom/room/prebuilt.sha256 pins (the room browser) are not
+# built here: SMARTROOM_ROOM_PACKAGES is a directory that holds them, and each
+# must match its pin. They are signed with the same key.
 set -euo pipefail
+here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 out=${1:?Usage: smartroom/build-packages OUT [COMMIT]}
 commit=${2:-}
 key=${SMARTROOM_PKG_KEY:?set SMARTROOM_PKG_KEY to the package signing key fingerprint}
@@ -44,6 +49,11 @@ for pkg in "${packages[@]}"; do
   (cd "$src/$pkg" && SMARTROOM_MAC_PKGS_COMMIT=$commit SMARTROOM_MAC_PKGS_DATE=$date \
     PKGDEST="$out/repo" makepkg --force --cleanbuild --syncdeps --noconfirm --sign --key "$key")
 done
+if grep -Eq '^[0-9a-f]{64} ' "$here/room/prebuilt.sha256"; then
+  [[ -d ${SMARTROOM_ROOM_PACKAGES:-} ]] ||
+    { echo "set SMARTROOM_ROOM_PACKAGES to the directory with the files room/prebuilt.sha256 pins" >&2; exit 1; }
+  "$here/copy-prebuilt" "$here/room/prebuilt.sha256" "$SMARTROOM_ROOM_PACKAGES" "$out/repo" "$key"
+fi
 rm -f "$out/repo"/smartroom.db* "$out/repo"/smartroom.files*
 repo-add -q "$out/repo/smartroom.db.tar.gz" "$out"/repo/*.pkg.tar.*[!g]
 cp --remove-destination "$out/repo/smartroom.db.tar.gz" "$out/repo/smartroom.db"

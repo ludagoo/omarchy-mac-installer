@@ -10,8 +10,9 @@ not stable. The channel's published edge database (2026-11-18) is still kernel
 draft pin omarchy-pkgs#3025 (`1102a177`, branch `pin/edgeB2`). This image
 therefore installs `aura` and `linux-aurora` from the signed SmartRoom repo,
 in place of the channel's `m1n1-aurora` and `linux-aurora`. The kernel
-package is ludagoo/linux `ave/t6021-j475c` (7.3.0 plus the t6021 encoder
-stack; the commit is `_commit` in the pkgs recipe), not omacom/linux-aurora
+package is ludagoo/linux `smartroom/edge-kernel-3` (7.3.0 plus the t6021
+encoder stack, the J475c SMC sensor tree and the apple-ave usage counter;
+the commit is `_commit` in the pkgs recipe), not omacom/linux-aurora
 `4454eda`: those encoder commits do not cherry-pick cleanly onto the pin.
 The package name
 `aura` stays in `policy.json`'s refused list. The builder allows it only when
@@ -37,7 +38,20 @@ requires the j475c device tree inside `m1n1/boot.bin` to be the kernel
 package's, with both encoders `okay` and their auxiliary DMA blocks
 `disabled` (enabled, they keep the encoder power domains on and the firmware
 never boots again after the first session), and prints the kernel and aura
-commits the image carries.
+commits the image carries. It also requires that tree's SMC hwmon node to
+discover temperatures (no `temperature-TH0x` left, `mTPL`, the nine
+verified power keys), the apple-ave module to carry the `busy_ns`,
+`active_sessions` and `frames` attributes, `cursor` `invisible` in both
+`/etc/skel/.config/hypr` files, and the room browser `room/packages` names.
+
+The room browser on this branch is `chromium-smartroom` (Chromium 158 with
+direct V4L2 decode and encode), not `omarchy-chromium-bin`. It is built on a
+Studio, not by `build-packages`: `room/prebuilt.sha256` pins the file,
+`SMARTROOM_ROOM_PACKAGES` names the directory it is in, and
+`smartroom/copy-prebuilt` copies it into the SmartRoom repo only if it
+matches and signs it with the SmartRoom package key. It conflicts with
+`omarchy-chromium-bin` and provides `chromium` and `/usr/bin/chromium`,
+which is where the SmartRoom agent looks for a browser.
 
 Zero-touch settings (Limine checksums off, `panic=10`) and the disk-split
 default (macOS keeps its minimum + 20 GiB when the install shrinks macOS)

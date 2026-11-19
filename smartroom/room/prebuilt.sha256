@@ -1,0 +1,10 @@
+# Packages the SmartRoom repo carries as built elsewhere (too long a compile
+# for the image build): sha256, two spaces, file name. smartroom/build-packages
+# copies each from SMARTROOM_ROOM_PACKAGES only if it matches, and signs it
+# with the SmartRoom package key like the packages it builds.
+#
+# chromium-smartroom 158.0.8127.36-1: Arch Linux ARM's Chromium with direct
+# V4L2 decode and encode, built on the home Studio from
+# /var/lib/srbuild/room-158 (PKGBUILD and sr-*.patch there). It conflicts
+# with omarchy-chromium-bin and provides chromium and /usr/bin/chromium.
+47c6c1d9afdd705a222cc1c82ee22da02aa950cce11c7f8e9233631fd24a2e78  chromium-smartroom-158.0.8127.36-1-aarch64.pkg.tar.xz

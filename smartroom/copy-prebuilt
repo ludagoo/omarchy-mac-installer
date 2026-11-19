@@ -1,0 +1,29 @@
+#!/bin/bash
+# Copy the prebuilt packages a pin file names into a repository directory:
+#   smartroom/copy-prebuilt PINS SRC DEST KEY
+# PINS holds "sha256  file" lines (# comments). Each file must be in SRC and
+# match its sha256. It is copied to DEST and signed there with KEY, a gpg
+# fingerprint in this keyring. Nothing is copied unless every pin matches.
+set -euo pipefail
+pins=${1:?Usage: smartroom/copy-prebuilt PINS SRC DEST KEY}
+src=${2:?Usage: smartroom/copy-prebuilt PINS SRC DEST KEY}
+dest=${3:?Usage: smartroom/copy-prebuilt PINS SRC DEST KEY}
+key=${4:?Usage: smartroom/copy-prebuilt PINS SRC DEST KEY}
+names=()
+while read -r sum name rest; do
+  [[ -n $sum && $sum != \#* ]] || continue
+  [[ $sum =~ ^[0-9a-f]{64}$ && -n $name && -z $rest && $name != */* ]] ||
+    { echo "$pins: not a \"sha256  file\" line: $sum $name $rest" >&2; exit 1; }
+  [[ -f $src/$name ]] || { echo "$src has no $name" >&2; exit 1; }
+  got=$(sha256sum "$src/$name" | cut -d' ' -f1)
+  [[ $got == "$sum" ]] || { echo "$name is $got, $pins pins $sum" >&2; exit 1; }
+  names+=("$name")
+done <"$pins"
+for name in "${names[@]}"; do
+  cp "$src/$name" "$dest/$name"
+  rm -f "$dest/$name.sig"
+  gpg --batch --local-user "$key" --detach-sign --output "$dest/$name.sig" "$dest/$name"
+  gpg --batch --status-fd 1 --verify "$dest/$name.sig" "$dest/$name" 2>/dev/null |
+    grep -Eq "^\[GNUPG:\] VALIDSIG .*$key" || { echo "$name.sig is not a good signature by $key" >&2; exit 1; }
+  echo "prebuilt $name"
+done
