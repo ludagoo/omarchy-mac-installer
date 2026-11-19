@@ -123,6 +123,17 @@ sys.exit(open(sys.argv[2], "rb").read() not in open(sys.argv[1], "rb").read())' 
     esac
     s=$($d "$1" | strings -a)
     for a in busy_ns active_sessions frames; do grep -qx "$a" <<<"$s" || exit 1; done' _ "$ave_ko"
+  # The 7.3 kernel names its GPU driver "aurora". A Mesa that only knows
+  # "asahi" cannot open it, and Hyprland aborts at start, screen or not.
+  gpu_ko=$(find "$m/usr/lib/modules/$kver" -path '*/gpu/drm/asahi/*.ko*' 2>/dev/null | head -n 1)
+  gallium=$(ls "$m"/usr/lib/libgallium-*.so 2>/dev/null | head -n 1)
+  echo "GPU module: ${gpu_ko#"$m"}; Mesa: ${gallium#"$m"} ($(cd "$m/var/lib/pacman/local" && ls -d mesa-aurora-[0-9]* 2>/dev/null))"
+  pair=$(dirname -- "${BASH_SOURCE[0]}")/../image-builder/builder/gpu_mesa_pair.py
+  if out=$(python3 "$pair" "$gpu_ko" "$gallium" 2>&1); then
+    pass "Mesa opens the kernel's GPU driver (${out#kernel GPU driver: })"
+  else
+    failed "Mesa opens the kernel's GPU driver: $out"
+  fi
   hypr=$m/etc/skel/.config/hypr
   check "cursor invisible in hyprland.conf (etc/skel)" awk '
     /^[[:space:]]*cursor[[:space:]]*\{/ { s = 1; next }

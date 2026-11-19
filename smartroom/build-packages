@@ -23,9 +23,10 @@ commit=$(git -C "$src/pkgs" rev-parse HEAD)
 date=$(TZ=UTC0 git -C "$src/pkgs" show -s --format=%cd --date=format-local:%Y%m%d HEAD)
 mkdir -p "$out/repo"
 packages=(smartroom-omarchy-helpers omarchy-mac-boot smartroom-boot-os)
-# The edge branch also builds aura and linux-aurora into this repo. They are
-# long compiles. SMARTROOM_EDGE_BOOT_PACKAGES, a directory of already-built
-# .pkg.tar.zst files, is copied in instead of compiling them again.
+# The edge branch also builds aura, linux-aurora and (when the pkgs branch has
+# its recipe) mesa-aurora into this repo. They are long compiles.
+# SMARTROOM_EDGE_BOOT_PACKAGES, a directory of already-built .pkg.tar.zst
+# files, is copied in instead of compiling them again.
 if [[ -d $src/pkgs/smartroom/pkgbuilds/aura ]]; then
   if [[ -n ${SMARTROOM_EDGE_BOOT_PACKAGES:-} ]]; then
     # studio-build's makepkg.conf compresses with xz unless a build overrides it.
@@ -40,8 +41,18 @@ if [[ -d $src/pkgs/smartroom/pkgbuilds/aura ]]; then
     shopt -u nullglob
     (( ${#found_aura[@]} && ${#found_kernel[@]} )) ||
       { echo "SMARTROOM_EDGE_BOOT_PACKAGES has no aura and linux-aurora packages" >&2; exit 1; }
+    # The edge Mesa that opens the 7.3 kernel's "aurora" GPU driver.
+    if [[ -d $src/pkgs/smartroom/pkgbuilds/mesa-aurora ]]; then
+      shopt -s nullglob
+      found_mesa=("${out}/repo"/mesa-aurora-[0-9]*.pkg.tar.zst "${out}/repo"/mesa-aurora-[0-9]*.pkg.tar.xz)
+      found_vulkan=("${out}/repo"/vulkan-aurora-[0-9]*.pkg.tar.zst "${out}/repo"/vulkan-aurora-[0-9]*.pkg.tar.xz)
+      shopt -u nullglob
+      (( ${#found_mesa[@]} && ${#found_vulkan[@]} )) ||
+        { echo "SMARTROOM_EDGE_BOOT_PACKAGES has no mesa-aurora and vulkan-aurora packages" >&2; exit 1; }
+    fi
   else
     packages+=(aura linux-aurora)
+    [[ ! -d $src/pkgs/smartroom/pkgbuilds/mesa-aurora ]] || packages+=(mesa-aurora)
   fi
 fi
 for pkg in "${packages[@]}"; do
