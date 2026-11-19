@@ -81,6 +81,25 @@ if [[ -e $m/etc/omarchy-mac-boot/headless ]]; then
     python3 "$aura_check" stage1 "$work/x/esp/aurora/stage1.bin"
   check "aura stage 2 on the ESP (m1n1/boot.bin carries aura-try)" \
     python3 "$aura_check" stage2 "$work/x/esp/m1n1/boot.bin"
+  echo "kernel commit: $(cat "$m/usr/share/doc/linux-aurora/smartroom-kernel-commit" 2>/dev/null)"
+  echo "aura commit: $(jq -r .source_commit "$m/usr/share/doc/aura/build-qualification.json" 2>/dev/null)"
+  check "kernel commit recorded in /usr/share/doc/linux-aurora/smartroom-kernel-commit" \
+    grep -Eqx '[0-9a-f]{40}' "$m/usr/share/doc/linux-aurora/smartroom-kernel-commit"
+  # With the encoders' auxiliary DMA blocks enabled, apple-ave-dma keeps the
+  # VENC power domains on, and after the first session's Halt the encoder
+  # firmware never boots again. The tree aura loads is the copy in boot.bin.
+  j475c=$(find "$m/usr/lib/modules/$kver" -name 't6021-j475c.dtb' 2>/dev/null | head -n 1)
+  check "m1n1/boot.bin carries the kernel package's j475c device tree" python3 -c '
+import sys
+sys.exit(open(sys.argv[2], "rb").read() not in open(sys.argv[1], "rb").read())' "$work/x/esp/m1n1/boot.bin" "$j475c"
+  for node in video-codec@40d100000 video-codec@507100000; do
+    check "j475c device tree: encoder $node okay" \
+      test "$(fdtget -t s "$j475c" "/soc/$node" status 2>/dev/null)" = okay
+  done
+  for node in dma-controller@40d020000 dma-controller@507020000; do
+    check "j475c device tree: encoder auxiliary DMA $node disabled" \
+      test "$(fdtget -t s "$j475c" "/soc/$node" status 2>/dev/null)" = disabled
+  done
   esp_bytes=$(find "$work/x/esp" -type f -printf '%s\n' | awk '{ s += $1 } END { print s + 0 }')
   echo "ESP tree bytes: $esp_bytes of 524288000"
   nm=$m/etc/NetworkManager/system-connections/smartroom-wired.nmconnection

@@ -10,9 +10,10 @@ not stable. The channel's published edge database (2026-11-18) is still kernel
 draft pin omarchy-pkgs#3025 (`1102a177`, branch `pin/edgeB2`). This image
 therefore installs `aura` and `linux-aurora` from the signed SmartRoom repo,
 in place of the channel's `m1n1-aurora` and `linux-aurora`. The kernel
-package is ludagoo/linux `b6d00c75` (7.3.0 plus the t6021 encoder stack),
-not omacom/linux-aurora `4454eda`: those encoder commits do not cherry-pick
-cleanly onto the pin. The package name
+package is ludagoo/linux `ave/t6021-j475c` (7.3.0 plus the t6021 encoder
+stack; the commit is `_commit` in the pkgs recipe), not omacom/linux-aurora
+`4454eda`: those encoder commits do not cherry-pick cleanly onto the pin.
+The package name
 `aura` stays in `policy.json`'s refused list. The builder allows it only when
 the resolved package comes from the SmartRoom repo.
 
@@ -31,7 +32,12 @@ The pinned Engine enrolls a **raw** first stage (`kmutil configure-boot --raw
 Stage 2 on the ESP is aura's `ESP_STAGE2` build, concatenated the way
 `update-m1n1` already concatenates `usr/lib/asahi-boot/m1n1.bin`. Desk-check
 requires the string `aura-try` in both, because m1n1-aurora also ships a file
-at `usr/share/aura/stage1/aura-raw.bin` and that file is m1n1.
+at `usr/share/aura/stage1/aura-raw.bin` and that file is m1n1. It also
+requires the j475c device tree inside `m1n1/boot.bin` to be the kernel
+package's, with both encoders `okay` and their auxiliary DMA blocks
+`disabled` (enabled, they keep the encoder power domains on and the firmware
+never boots again after the first session), and prints the kernel and aura
+commits the image carries.
 
 Zero-touch settings (Limine checksums off, `panic=10`) and the disk-split
 default (macOS keeps its minimum + 20 GiB when the install shrinks macOS)
