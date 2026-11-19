@@ -83,6 +83,8 @@ if [[ -e $m/etc/omarchy-mac-boot/headless ]]; then
     python3 "$aura_check" stage2 "$work/x/esp/m1n1/boot.bin"
   echo "kernel commit: $(cat "$m/usr/share/doc/linux-aurora/smartroom-kernel-commit" 2>/dev/null)"
   echo "aura commit: $(jq -r .source_commit "$m/usr/share/doc/aura/build-qualification.json" 2>/dev/null)"
+  echo "build-info: $(paste -sd' ' "$m/usr/share/smartroomos/build-info" 2>/dev/null)"
+  check "build-info names the aura boot chain" grep -q '^bootloader=aura ' "$m/usr/share/smartroomos/build-info"
   check "kernel commit recorded in /usr/share/doc/linux-aurora/smartroom-kernel-commit" \
     grep -Eqx '[0-9a-f]{40}' "$m/usr/share/doc/linux-aurora/smartroom-kernel-commit"
   # With the encoders' auxiliary DMA blocks enabled, apple-ave-dma keeps the

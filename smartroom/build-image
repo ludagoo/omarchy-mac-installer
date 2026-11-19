@@ -47,7 +47,8 @@ release=$(sed -n 's/^release_tag=//p' "$inputs")
     "$(date -u +%FT%TZ)" "$version" "${channel:-unknown}" "${release:-no release tag}"
   printf 'installer_fork=%s\nfirmware_git=%s\n' "$(git -C "$here" rev-parse HEAD)" "$firmware"
   cat "$packages/SOURCE"
-  if bsdtar -tf "$packages/repo/smartroom.db" | grep -q '/aura-[^/]*/desc$'; then
+  names=$(bsdtar -xOf "$packages/repo/smartroom.db" '*/desc' | awk '/^%NAME%$/ { getline; print }')
+  if grep -Fxq aura <<<"$names"; then
     printf 'bootloader=aura stage 1 enrolled for j475cap on 13.5, aura stage 2 on the ESP, Limine still loads the UKI\n'
   else
     printf 'bootloader=limine\n'
