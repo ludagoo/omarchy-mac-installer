@@ -42,7 +42,18 @@ commits the image carries. It also requires that tree's SMC hwmon node to
 discover temperatures (no `temperature-TH0x` left, `mTPL`, the nine
 verified power keys), the apple-ave module to carry the `busy_ns`,
 `active_sessions` and `frames` attributes, `cursor` `invisible` in both
-`/etc/skel/.config/hypr` files, and the room browser `room/packages` names.
+`/usr/share/smartroomos/hypr` files, and the room browser `room/packages` names.
+It also runs `smartroom/room-lockdown-check` on the image (no local shell or
+root from a classroom keyboard: locked passwords, the room user out of
+`wheel`, a sudoers file with only the Room Controller's commands and
+`sudo -l` agreeing, no terminal package, no key binds, VT switching off,
+the power, reboot, suspend and hibernate keys ignored by logind and
+Ctrl+Alt+Del masked, the kiosk config owned by the image and not copied
+into a home). `room/packages` no longer installs `foot`.
+`mac/engine-install` takes only an https server URL, and the production
+server only with `--production`, which adds `SMARTROOMOS_PRODUCTION=1` to
+the `firstboot.env` it puts on the ESP (the firmware's first boot refuses
+production without it).
 
 The room browser on this branch is `chromium-smartroom` (Chromium 158 with
 direct V4L2 decode and encode), not `omarchy-chromium-bin`. It is built on a

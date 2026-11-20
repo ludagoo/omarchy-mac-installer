@@ -1,0 +1,111 @@
+#!/bin/bash
+# The room's lockdown, checked on an image root (desk-check mounts one) or a
+# scratch tree (the test):
+#   smartroom/room-lockdown-check ROOT
+# A classroom keyboard must reach no shell and no root: no password login, no
+# broad sudo, no terminal, no key binds, no VT switch, Ctrl+Alt+Del and the
+# power key do nothing. The kiosk config belongs to the image, so updates
+# reach it. Prints PASS/FAIL lines; exits non-zero on any FAIL. As root it
+# also asks the image's own sudo what the room user may run.
+set -uo pipefail
+r=${1:?Usage: smartroom/room-lockdown-check ROOT}
+user=smartroomcontroller
+fails=0
+pass() { echo "PASS $*"; }
+failed() { echo "FAIL $*"; fails=$((fails + 1)); }
+check() { local what=$1; shift; if "$@" >/dev/null 2>&1; then pass "$what"; else failed "$what"; fi; }
+
+# Kiosk config: /usr/share/smartroomos/hypr, never a copy in a home.
+hypr=$r/usr/share/smartroomos/hypr
+session=$r/usr/local/bin/smartroomos-session
+for f in hyprland.conf hyprland.lua; do
+  check "kiosk config owned by the image: /usr/share/smartroomos/hypr/$f" test -s "$hypr/$f"
+  check "no kiosk $f in /home/$user (the session reads the image's)" test ! -e "$r/home/$user/.config/hypr/$f"
+done
+check "no kiosk config in /etc/skel (a one-time copy never gets updates)" test ! -e "$r/etc/skel/.config/hypr"
+check "the session starts Hyprland with /usr/share/smartroomos/hypr" grep -q 'local dir=/usr/share/smartroomos/hypr ' "$session"
+check "the session creates ~/.cache (crash reports)" grep -qF 'mkdir -p "${XDG_CACHE_HOME:-$HOME/.cache}"' "$session"
+conf_binds() { grep -Eq '^[[:space:]]*(bind[a-z]*|exec(-once|r|r-once)?)[[:space:]]*=' "$1"; }
+lua_binds() { sed 's/--.*//' "$1" | grep -Eq 'hl\.bind|exec_cmd|hl\.exec'; }
+check "no key binds or exec in hyprland.conf" bash -c "$(declare -f conf_binds); ! conf_binds \"\$1\"" _ "$hypr/hyprland.conf"
+check "no key binds or exec in hyprland.lua" bash -c "$(declare -f lua_binds); ! lua_binds \"\$1\"" _ "$hypr/hyprland.lua"
+check "VT switching off in hyprland.conf (kb_options = srvrkeys:none)" \
+  grep -Eq '^[[:space:]]*kb_options[[:space:]]*=[[:space:]]*srvrkeys:none[[:space:]]*$' "$hypr/hyprland.conf"
+check "VT switching off in hyprland.lua (kb_options = \"srvrkeys:none\")" \
+  bash -c 'sed "s/--.*//" "$1" | grep -Eq "(^|[{,[:space:]])kb_options[[:space:]]*=[[:space:]]*\"srvrkeys:none\""' _ "$hypr/hyprland.lua"
+
+# Terminals: none installed.
+for pkg in foot alacritty kitty ghostty xterm; do
+  check "no terminal: $pkg not installed" test -z "$(ls -d "$r/var/lib/pacman/local/$pkg"-[0-9]* 2>/dev/null)"
+done
+
+# Accounts: locked (! or *), never empty; the room user is not in wheel.
+locked() { awk -F: -v u="$2" '$1 == u { f = 1; ok = ($2 ~ /^[!*]/) } END { exit !(f && ok) }' "$1/etc/shadow"; }
+check "$user password locked (not empty)" locked "$r" "$user"
+check "root password locked" locked "$r" root
+if grep -q '^alarm:' "$r/etc/passwd" 2>/dev/null; then
+  check "alarm password locked" locked "$r" alarm
+fi
+in_wheel() { awk -F: -v u="$2" '$1 == "wheel" { n = split($4, m, ","); for (i = 1; i <= n; i++) if (m[i] == u) f = 1 } END { exit !f }' "$1/etc/group"; }
+check "$user not in wheel (Omarchy's NOPASSWD and polkit rules)" bash -c "$(declare -f in_wheel); ! in_wheel \"\$1\" \"\$2\"" _ "$r" "$user"
+check "sshd key-only (PasswordAuthentication no)" grep -Rqs '^PasswordAuthentication no' "$r/etc/ssh/sshd_config.d"
+
+# sudo: the Room Controller's own commands, nothing broad.
+sudoers=$r/etc/sudoers.d/$user
+rules() { sed 's/#.*//' "$1" | sed -e ':a' -e '/\\$/N; s/\\\n//; ta'; }
+broad='(PASSWD:|NOPASSWD:|\)|,)[[:space:]]*ALL[[:space:]]*(,|$)'
+shells='(/bin/|/usr/bin/)(ba|z|da|fi|c|tc|k)?sh([[:space:],]|$)|sudoedit|/usr/bin/(env|python[0-9.]*|perl|vi|vim|nano|pacman|systemd-run|su|chroot)([[:space:],]|$)'
+check "sudoers.d/$user present" test -s "$sudoers"
+check "sudoers.d/$user grants no ALL command" bash -c "$(declare -f rules); ! rules \"\$1\" | grep -Eq '$broad'" _ "$sudoers"
+check "sudoers.d/$user grants no shell, editor, interpreter or pacman" bash -c "$(declare -f rules); ! rules \"\$1\" | grep -Eq '$shells'" _ "$sudoers"
+check "sudoers.d/$user grants systemctl reboot" bash -c "$(declare -f rules); rules \"\$1\" | grep -q '/usr/bin/systemctl reboot'" _ "$sudoers"
+check "sudoers.d/$user pins the snapshot helper's arguments (regex)" \
+  bash -c "$(declare -f rules); rules \"\$1\" | grep -q '/usr/local/bin/smartroomos-snapshot ^'" _ "$sudoers"
+if (( EUID == 0 )) && [[ -x $r/usr/bin/sudo && -e $r/proc/self ]]; then
+  list=$(chroot "$r" sudo -n -l -U "$user" 2>&1)
+  echo "sudo -l -U $user:"
+  sed 's/^/  /' <<<"$list" | head -n 30
+  check "sudo -l -U $user: no ALL command" bash -c '! grep -Eq "$1" <<<"$2"' _ "$broad" "$list"
+  check "sudo -l -U $user: systemctl reboot" grep -q '/usr/bin/systemctl reboot' <<<"$list"
+else
+  echo "SKIP sudo -l -U $user (needs root and a mounted image)"
+fi
+
+# Keys: logind ignores power, reboot, suspend and hibernate (short and long);
+# no VTs; Ctrl+Alt+Del does nothing. A held power button is the hardware's
+# own forced off.
+conf_value() { # NAME SECTION KEY: what systemd reads (main file, then drop-ins by name; /etc wins a name)
+  local name=$1 section=$2 key=$3 d f n v="" got
+  local -a files=()
+  local -A drop=()
+  for d in etc run usr/local/lib usr/lib; do
+    [[ -f $r/$d/systemd/$name.conf ]] && { files+=("$r/$d/systemd/$name.conf"); break; }
+  done
+  for d in usr/lib usr/local/lib run etc; do
+    for f in "$r/$d/systemd/$name.conf.d"/*.conf; do
+      [[ -f $f ]] && drop[${f##*/}]=$f
+    done
+  done
+  if (( ${#drop[@]} )); then
+    while IFS= read -r n; do files+=("${drop[$n]}"); done < <(printf '%s\n' "${!drop[@]}" | sort)
+  fi
+  for f in "${files[@]}"; do
+    got=$(awk -v s="[$section]" -v k="$key" '
+      /^[[:space:]]*\[/ { in_s = ($1 == s); next }
+      in_s && $0 ~ "^[[:space:]]*" k "[[:space:]]*=" { sub(/^[^=]*=[[:space:]]*/, ""); sub(/[[:space:]]+$/, ""); v = $0; set = 1 }
+      END { if (set) print "=" v }' "$f")
+    [[ -n $got ]] && v=${got#=}
+  done
+  printf '%s\n' "$v"
+}
+for key in HandlePowerKey HandlePowerKeyLongPress HandleRebootKey HandleRebootKeyLongPress \
+    HandleSuspendKey HandleSuspendKeyLongPress HandleHibernateKey HandleHibernateKeyLongPress; do
+  check "logind $key=ignore (effective)" test "$(conf_value logind Login "$key")" = ignore
+done
+check "logind NAutoVTs=0 (effective)" test "$(conf_value logind Login NAutoVTs)" = 0
+check "systemd CtrlAltDelBurstAction=none (effective)" test "$(conf_value system Manager CtrlAltDelBurstAction)" = none
+check "ctrl-alt-del.target masked" test "$(readlink "$r/etc/systemd/system/ctrl-alt-del.target")" = /dev/null
+check "getty@tty1 masked" test "$(readlink "$r/etc/systemd/system/getty@tty1.service")" = /dev/null
+
+(( fails == 0 )) && echo "ROOM LOCKDOWN PASS" || echo "ROOM LOCKDOWN FAIL ($fails)"
+exit $(( fails > 0 ))

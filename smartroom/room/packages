@@ -19,7 +19,6 @@ chromium-smartroom       # room browser, direct V4L2 decode and encode (room/pre
 libva                    # VA-API for Chromium decode
 ffmpeg                   # software encode for previews
 greetd                   # passwordless autologin, no greeter UI
-foot                     # Super+Return escape hatch
 pipewire
 pipewire-pulse
 pipewire-alsa
