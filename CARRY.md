@@ -11,7 +11,8 @@ draft pin omarchy-pkgs#3025 (`1102a177`, branch `pin/edgeB2`). This image
 therefore installs `aura` and `linux-aurora` from the signed SmartRoom repo,
 in place of the channel's `m1n1-aurora` and `linux-aurora`. The kernel
 package is ludagoo/linux `smartroom/edge-kernel-3` (7.3.0 plus the t6021
-encoder stack, the J475c SMC sensor tree and the apple-ave usage counter;
+encoder stack, the J475c SMC sensor tree, the apple-ave usage counter, and
+the J475c `dcpext2`/`dcpext3` three-display device-tree wiring;
 the commit is `_commit` in the pkgs recipe), not omacom/linux-aurora
 `4454eda`: those encoder commits do not cherry-pick cleanly onto the pin.
 The package name
@@ -35,9 +36,14 @@ Stage 2 on the ESP is aura's `ESP_STAGE2` build, concatenated the way
 requires the string `aura-try` in both, because m1n1-aurora also ships a file
 at `usr/share/aura/stage1/aura-raw.bin` and that file is m1n1. It also
 requires the j475c device tree inside `m1n1/boot.bin` to be the kernel
-package's, with both encoders `okay` and their auxiliary DMA blocks
+package's, with both encoders `okay`, their auxiliary DMA blocks
 `disabled` (enabled, they keep the encoder power domains on and the firmware
-never boots again after the first session), and prints the kernel and aura
+never boots again after the first session), and `dcpext2`/`dcpext3` wired
+for three displays (`image-builder/builder/j475c_display_dtb.py`: both DCPs
+kept `disabled` in the raw DTB for `aura` firmware gating, DARTs and
+mailboxes `okay` with matching DMA ranges, four-port `typec0..3` routes,
+crossbar states 4 and 6, and symmetric `port@3` endpoints), and prints the
+kernel and aura
 commits the image carries. It also requires that tree's SMC hwmon node to
 discover temperatures (no `temperature-TH0x` left, `mTPL`, the nine
 verified power keys), the apple-ave module to carry the `busy_ns`,
