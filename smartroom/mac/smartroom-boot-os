@@ -49,9 +49,200 @@ done
 [ "$(id -u)" = 0 ] || die "run with sudo"
 
 tmp=$(mktemp -d /tmp/smartroom-boot-os.XXXXXX)
-trap 'rm -rf "$tmp"' EXIT
+mounted_esp=""
+cleanup() {
+  if [ -n "$mounted_esp" ]; then diskutil unmount "$mounted_esp" >/dev/null 2>&1 || true; fi
+  rm -rf "$tmp"
+}
+trap cleanup EXIT
 x() { plutil -extract "$2" raw -o - "$1" 2>/dev/null; }      # FILE KEYPATH
 has() { plutil -extract "$2" xml1 -o /dev/null "$1" 2>/dev/null; }
+up() { printf '%s' "$1" | tr '[:lower:]' '[:upper:]'; }
+
+intel_main() {
+  local APPLE_GUID="7c436110-ab2a-4bbb-a880-fe41995c9f82"
+  diskutil info -plist / >"$tmp/root" 2>/dev/null || die "diskutil info / failed"
+  local store mac_ref disk mac_store_uuid
+  store=$(x "$tmp/root" APFSPhysicalStores.0.APFSPhysicalStore) || die "cannot read macOS physical store"
+  mac_ref=$(x "$tmp/root" APFSContainerReference) || die "cannot read macOS container"
+  diskutil info -plist "$store" >"$tmp/store" 2>/dev/null || die "diskutil info $store failed"
+  disk=$(x "$tmp/store" ParentWholeDisk) || die "cannot read internal disk"
+  mac_store_uuid=$(up "$(x "$tmp/store" DiskUUID)")
+
+  diskutil list -plist "$disk" >"$tmp/list" 2>/dev/null || die "diskutil list $disk failed"
+  local k="" i=0
+  while has "$tmp/list" "AllDisksAndPartitions.$i"; do
+    if [ "$(x "$tmp/list" "AllDisksAndPartitions.$i.DeviceIdentifier")" = "$disk" ]; then
+      k=$i; break
+    fi
+    i=$((i + 1))
+  done
+  [ -n "$k" ] || die "$disk missing from diskutil list"
+
+  # Locate SmartRoom's own ESP (at offset after macOS APFS; never disk0s1 Apple EFI).
+  local mac_off fw_esp="" fw_uuid="" pid ptype puuid poff mp was_mounted
+  diskutil info -plist "$store" >"$tmp/macp" 2>/dev/null || die "diskutil info $store failed"
+  mac_off=$(x "$tmp/macp" PartitionMapPartitionOffset)
+  i=0
+  while has "$tmp/list" "AllDisksAndPartitions.$k.Partitions.$i"; do
+    pid=$(x "$tmp/list" "AllDisksAndPartitions.$k.Partitions.$i.DeviceIdentifier")
+    diskutil info -plist "$pid" >"$tmp/pi" 2>/dev/null || { i=$((i + 1)); continue; }
+    ptype=$(x "$tmp/pi" Content || true)
+    poff=$(x "$tmp/pi" PartitionMapPartitionOffset || echo 0)
+    if [ "$ptype" = EFI ] && [ "$poff" -gt "$mac_off" ]; then
+      puuid=$(up "$(x "$tmp/pi" DiskUUID || true)")
+      mp=$(x "$tmp/pi" MountPoint || true)
+      was_mounted=1
+      if [ -z "$mp" ]; then
+        was_mounted=0
+        mp="$tmp/esp-$pid"
+        mkdir -p "$mp"
+        if ! diskutil mount readOnly nobrowse -mountPoint "$mp" "$pid" >/dev/null 2>&1; then
+          i=$((i + 1)); continue
+        fi
+        mounted_esp=$pid
+      fi
+      if { [ -s "$mp/EFI/BOOT/BOOTX64.EFI" ] || [ -s "$mp/EFI/limine/limine_x64.efi" ]; } &&
+         { [ -s "$mp/limine.conf" ] || [ -d "$mp/smartroomos" ] || [ -s "$mp/EFI/Linux/smartroomos_linux-t2.efi" ]; }; then
+        [ -z "$fw_esp" ] || die "more than one SmartRoom Firmware ESP ($fw_esp, $pid)"
+        fw_esp=$pid
+        fw_uuid=$puuid
+      fi
+      if [ "$was_mounted" -eq 0 ]; then
+        diskutil unmount "$pid" >/dev/null 2>&1 || true
+        mounted_esp=""
+      fi
+    fi
+    i=$((i + 1))
+  done
+
+  intel_classify_boot() {
+    local dev_line=$1 id suuid parent
+    case $dev_line in
+      "") echo none; return 0 ;;
+      /dev/disk*)
+        id=${dev_line#/dev/}
+        diskutil info -plist "$id" >"$tmp/bi" 2>/dev/null || { echo "other ($dev_line)"; return 0; }
+        if has "$tmp/bi" APFSPhysicalStores.0; then
+          local st
+          st=$(x "$tmp/bi" APFSPhysicalStores.0.APFSPhysicalStore || true)
+          diskutil info -plist "$st" >"$tmp/bs" 2>/dev/null || true
+          suuid=$(up "$(x "$tmp/bs" DiskUUID || true)")
+          parent=$(x "$tmp/bs" ParentWholeDisk || true)
+          if [ "$suuid" = "$mac_store_uuid" ] && [ "$parent" = "$disk" ]; then
+            echo macOS; return 0
+          fi
+        fi
+        if [ -n "$fw_esp" ] && [ "$id" = "$fw_esp" ]; then
+          echo "SmartRoom Firmware"; return 0
+        fi
+        if [ -n "$fw_uuid" ] && [ "$(up "$(x "$tmp/bi" DiskUUID || true)")" = "$fw_uuid" ]; then
+          echo "SmartRoom Firmware"; return 0
+        fi
+        echo "other ($id)"; return 0 ;;
+    esac
+    case $(up "$dev_line") in
+      *CORESERVICES*BOOT.EFI*) echo macOS ;;
+      *BOOTX64.EFI*|*LIMINE_X64.EFI*) echo "SmartRoom Firmware" ;;
+      *)
+        if [ -n "$fw_uuid" ] && printf '%s' "$(up "$dev_line")" | grep -q "$fw_uuid"; then
+          echo "SmartRoom Firmware"
+        elif printf '%s' "$(up "$dev_line")" | grep -q "$mac_store_uuid"; then
+          echo macOS
+        else
+          echo "other ($dev_line)"
+        fi ;;
+    esac
+  }
+
+  intel_default_label() {
+    local b nv
+    b=$(bless --getBoot 2>/dev/null | head -n 1 || true)
+    if [ -n "$b" ]; then
+      intel_classify_boot "$b"
+      return 0
+    fi
+    nv=$(nvram "${APPLE_GUID}:efi-boot-device" 2>/dev/null | tr '\n' ' ' || true)
+    nv=$(printf '%s' "$nv" | sed 's/^[^	]*	//')
+    intel_classify_boot "$nv"
+  }
+  intel_next_label() {
+    local nv
+    nv=$(nvram "${APPLE_GUID}:efi-boot-next" 2>/dev/null | tr '\n' ' ' || true)
+    nv=$(printf '%s' "$nv" | sed 's/^[^	]*	//')
+    intel_classify_boot "$nv"
+  }
+
+  if [ "$target" = status ]; then
+    echo "default: $(intel_default_label)"
+    echo "next:    $(intel_next_label)"
+    echo "firmware partition: ${fw_esp:-none}"
+    exit 0
+  fi
+
+  local sip_out sip_ok=0
+  sip_out=$(csrutil status 2>/dev/null || true)
+  case $sip_out in
+    *"System Integrity Protection status: disabled"*|*"NVRAM Protections: disabled"*) sip_ok=1 ;;
+  esac
+  [ "$sip_ok" -eq 1 ] ||
+    die "SIP protects NVRAM ($sip_out); boot Recovery (Cmd+R) -> csrutil disable"
+
+  local want_label next_arg=""
+  if [ "$once" = 1 ]; then next_arg="--nextonly"; fi
+
+  if [ "$target" = firmware ]; then
+    [ -n "$fw_esp" ] || die "no SmartRoom Firmware ESP partition found on $disk"
+    diskutil info -plist "$fw_esp" >"$tmp/fwi" 2>/dev/null || die "diskutil info $fw_esp failed"
+    mp=$(x "$tmp/fwi" MountPoint || true)
+    was_mounted=1
+    if [ -z "$mp" ]; then
+      was_mounted=0
+      diskutil mount "$fw_esp" >/dev/null || die "could not mount $fw_esp"
+      mounted_esp=$fw_esp
+      diskutil info -plist "$fw_esp" >"$tmp/fwi" 2>/dev/null || die "diskutil info $fw_esp failed"
+      mp=$(x "$tmp/fwi" MountPoint || true)
+    fi
+    [ -n "$mp" ] && [ -d "$mp" ] || die "SmartRoom ESP $fw_esp has no mount point"
+    local efi_rel=""
+    if [ -s "$mp/EFI/BOOT/BOOTX64.EFI" ]; then
+      efi_rel="EFI/BOOT/BOOTX64.EFI"
+    elif [ -s "$mp/EFI/limine/limine_x64.efi" ]; then
+      efi_rel="EFI/limine/limine_x64.efi"
+    else
+      die "neither EFI/BOOT/BOOTX64.EFI nor EFI/limine/limine_x64.efi exists on $fw_esp"
+    fi
+    bless --mount "$mp" --setBoot $next_arg --file "$mp/$efi_rel" --shortform >"$tmp/bless.out" 2>&1 ||
+      die "bless failed ($(tail -n 1 "$tmp/bless.out"))"
+    if [ "$was_mounted" -eq 0 ]; then
+      diskutil unmount "$fw_esp" >/dev/null 2>&1 || true
+      mounted_esp=""
+    fi
+    want_label="SmartRoom Firmware"
+  else
+    bless --mount / --setBoot $next_arg >"$tmp/bless.out" 2>&1 ||
+      die "bless --mount / failed ($(tail -n 1 "$tmp/bless.out"))"
+    want_label="macOS"
+  fi
+
+  if [ "$once" = 0 ]; then
+    nvram -d "${APPLE_GUID}:efi-boot-next" >/dev/null 2>&1 || true
+    nvram -d "${APPLE_GUID}:efi-boot-next-data" >/dev/null 2>&1 || true
+    got=$(intel_default_label)
+    where=default
+  else
+    got=$(intel_next_label)
+    where="next start"
+  fi
+  [ "$got" = "$want_label" ] || die "asked for $want_label as the $where, but the Mac reports $got"
+  echo "$where: $want_label"
+  [ "$reboot" = 0 ] || shutdown -r now
+}
+
+if [ "$(uname -m)" = x86_64 ]; then
+  intel_main
+  exit 0
+fi
 
 # The firmware's System volume: exactly one APFS System volume with our name.
 diskutil apfs list -plist >"$tmp/apfs" || die "diskutil apfs list failed"
