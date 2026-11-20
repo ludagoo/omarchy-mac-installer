@@ -70,6 +70,12 @@ fi
 check "sudoers and sudoers.d parse, with the owner and mode sudo requires" chroot "$m" visudo -c -q
 if [[ -e $m/etc/omarchy-mac-boot/headless ]]; then
   echo "== SmartRoom image"
+  # No local shell or root from a classroom keyboard; see the script's header.
+  lockdown=$(bash "$(dirname -- "${BASH_SOURCE[0]}")/room-lockdown-check" "$m" 2>&1)
+  lockdown_rc=$?
+  grep -v -e '^ROOM LOCKDOWN ' <<<"$lockdown"
+  fails=$((fails + $(grep -c '^FAIL ' <<<"$lockdown")))
+  (( lockdown_rc == 0 )) || grep -q '^FAIL ' <<<"$lockdown" || failed "room-lockdown-check did not run: $lockdown"
   nm=$m/etc/NetworkManager/system-connections/smartroom-wired.nmconnection
   check "wired profile present (AQC113 needs accept-all-mac-addresses)" test -f "$nm"
   check "wired profile is root's, mode 0600 (NetworkManager ignores it otherwise)" test "$(stat -c '%u:%g %a' "$nm" 2>/dev/null)" = "0:0 600"

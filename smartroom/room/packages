@@ -19,7 +19,6 @@ omarchy-chromium-bin     # Omarchy's Chromium
 libva                    # VA-API for Chromium decode
 ffmpeg                   # software encode for previews
 greetd                   # passwordless autologin, no greeter UI
-foot                     # Super+Return escape hatch
 pipewire
 pipewire-pulse
 pipewire-alsa

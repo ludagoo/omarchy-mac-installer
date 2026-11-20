@@ -352,11 +352,43 @@ pw "$PW" | run "${common[@]}" --firstboot-env "$t/bad.env" && fail "a firstboot.
 grep -q "SMARTROOMOS_AGENT_INSTALL_SHA256" "$t/out" || fail "wrong refusal: $(tail -3 "$t/out")"
 pw "$PW" | CONSOLE_USER="" "$ei" "${common[@]}" --firstboot-env "$t/fb.env" >"$t/out" 2>&1 && fail "ran with no console user"
 grep -q "no user is logged in at this Mac's console" "$t/out" || fail "wrong refusal: $(tail -3 "$t/out")"
-pw "$PW" | run "${common[@]/lucas/nobody}" --firstboot-env "$t/fb.env" && fail "a non-owner was accepted"
+pw "$PW" | run "${common[@]/#lucas/nobody}" --firstboot-env "$t/fb.env" && fail "a non-owner was accepted"
 grep -q "nobody is not a macOS machine owner" "$t/out" || fail "wrong refusal: $(tail -3 "$t/out")"
 pw "$PW" | NO_TOKEN=lucas run "${common[@]}" --firstboot-env "$t/fb.env" && fail "an owner without a secure token was accepted"
 [[ $(disk) == "$initial" ]] || fail "a refusal changed the disk"
 echo "ok - refuses: no firstboot.env, a bad one, no console user, a non-owner, no secure token"
+
+# server trust: https only; the production server only with --production
+sha0=$(printf '%064d' 0)
+fbe() { printf 'SMARTROOMOS_SERVER_URL=%s\nSMARTROOMOS_AGENT_INSTALL_SHA256=%s\n' "$1" "$sha0" >"$t/$2"; }
+fbe http://rooms.example.invalid http.env
+pw "$PW" | run "${common[@]}" --firstboot-env "$t/http.env" && fail "an http server URL was accepted"
+grep -q "plain http is refused" "$t/out" || fail "wrong refusal: $(tail -3 "$t/out")"
+fbe https://smartroom.goossen.dev prod.env
+pw "$PW" | run "${common[@]}" --firstboot-env "$t/prod.env" && fail "the production server without --production was accepted"
+grep -q "names the production server (smartroom.goossen.dev); say --production" "$t/out" || fail "wrong refusal: $(tail -3 "$t/out")"
+fbe https://SmartRoom.Goossen.dev./api prod-dot.env
+pw "$PW" | run "${common[@]}" --firstboot-env "$t/prod-dot.env" && fail "the production server with a trailing dot was accepted"
+grep -q "say --production" "$t/out" || fail "wrong refusal: $(tail -3 "$t/out")"
+pw "$PW" | run "${common[@]}" --firstboot-env "$t/fb.env" --production && fail "--production with a dev server was accepted"
+grep -q "production needs the production server" "$t/out" || fail "wrong refusal: $(tail -3 "$t/out")"
+{ cat "$t/prod.env"; echo SMARTROOMOS_PRODUCTION=1; } >"$t/prod-marked.env"
+pw "$PW" | run "${common[@]}" --firstboot-env "$t/prod-marked.env" --production && fail "a file that sets SMARTROOMOS_PRODUCTION was accepted"
+grep -q "sets SMARTROOMOS_PRODUCTION; say --production instead" "$t/out" || fail "wrong refusal: $(tail -3 "$t/out")"
+pw "$PW" | run "${common[@]}" --no-firstboot-env --production && fail "--production without --firstboot-env was accepted"
+grep -q "production needs --firstboot-env" "$t/out" || fail "wrong refusal: $(tail -3 "$t/out")"
+{ cat "$t/fb.env"; echo SMARTROOMOS_SERVER_URL=https://smartroom.goossen.dev; } >"$t/two.env"
+pw "$PW" | run "${common[@]}" --firstboot-env "$t/two.env" && fail "two server URLs were accepted"
+grep -q "exactly one SMARTROOMOS_SERVER_URL" "$t/out" || fail "wrong refusal: $(tail -3 "$t/out")"
+[[ $(disk) == "$initial" ]] || fail "a server-trust refusal changed the disk"
+printf 'SMARTROOMOS_SERVER_URL=https://smartroom.goossen.dev\nSMARTROOMOS_AGENT_INSTALL_SHA256=%s' "$sha0" >"$t/prod-nonl.env"
+pw "$PW" | run "${common[@]}" --firstboot-env "$t/prod-nonl.env" --production || fail "production dry run: $(tail -5 "$t/out")"
+prun=$(ls -d "$st"/run-* | tail -n 1)
+[[ $(tail -n 2 "$prun/firstboot.env") == $'SMARTROOMOS_AGENT_INSTALL_SHA256='"$sha0"$'\nSMARTROOMOS_PRODUCTION=1' ]] ||
+  fail "--production must add SMARTROOMOS_PRODUCTION=1 on its own line: $(cat "$prun/firstboot.env")"
+[[ $(disk) == "$initial" ]] || fail "the production dry run changed the disk"
+sleep 1
+echo "ok - server trust: https only; production only with --production, which marks the ESP copy"
 
 # dry run: inspect + plan by the real planner, nothing on disk
 pw "$PW" | run "${common[@]}" --firstboot-env "$t/fb.env" || fail "dry run: $(tail -5 "$t/out")"
