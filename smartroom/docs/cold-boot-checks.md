@@ -115,8 +115,9 @@ restore, byte `0x22`), and the image check proves the unit and the kernel switch
 are in the image. Whether a real cut brings the room back is what this test
 answers. A Mac mini (Intel, T2) cannot be set from Linux at all: it needs
 `sudo pmset -a autorestart 1` in macOS before the disk is erased
-(`engine-install` does this for a Studio; the mini's installer must do it too
-once the macOS path is merged).
+(`engine-install` does this for a Studio, with a warning if it fails;
+`mac/mini-install` does it for a mini before it touches the disk and refuses to
+go on unless the setting reads back as 1).
 
 Before you start, with the Studio on Linux and SSH working:
 

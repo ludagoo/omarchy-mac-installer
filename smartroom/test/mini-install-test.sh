@@ -170,6 +170,22 @@ printf '#!/bin/bash\necho "${FAKE_MODEL:-Macmini8,1}"\n' >"$mock/sysctl"
 printf '#!/bin/bash\necho "${FAKE_SIP:-System Integrity Protection status: disabled.}"\n' >"$mock/csrutil"
 printf '#!/bin/bash\necho "${FAKE_FWPASS:-Password Enabled: No}"\n' >"$mock/firmwarepasswd"
 printf '#!/bin/bash\nexit 0\n' >"$mock/system_profiler"
+# pmset: -a autorestart N is kept in $t/pmset.state (PMSET_FAIL=1 refuses, PMSET_STICK=0 accepts and keeps the old value);
+# -g prints it. Every call goes to $t/pmset.log.
+cat >"$mock/pmset" <<SH
+#!/bin/bash
+echo "\$*" >>"$t/pmset.log"
+[ "\${PMSET_FAIL:-0}" = 1 ] && exit 1
+if [ "\$1" = -a ] && [ "\$2" = autorestart ]; then
+  [ "\${PMSET_STICK:-1}" = 0 ] || echo "\$3" >"$t/pmset.state"
+  exit 0
+fi
+if [ "\$1" = -g ]; then
+  printf 'System-wide power settings:\\nCurrently in use:\\n standby 1\\n autorestart          %s\\n' "\$(cat "$t/pmset.state" 2>/dev/null || echo 0)"
+  exit 0
+fi
+exit 1
+SH
 printf '#!/bin/bash\necho "tmutil $*" >>%q\n' "$t/calls.log" >"$mock/tmutil"
 printf '#!/bin/bash\necho "shutdown $*" >>%q\n' "$t/calls.log" >"$mock/shutdown"
 cat >"$mock/shasum" <<'SH'
@@ -306,6 +322,7 @@ s = {
 json.dump(s, open(sys.argv[1], "w"), indent=1)
 PY
   : >"$FAKE_LOG"
+  rm -f "$t/pmset.state" "$t/pmset.log"
 }
 
 # 1. Pre-flight refusals (F7/F20): zero disk mutations
@@ -336,8 +353,32 @@ grep -q "shrink disk0s2 from 249 GiB to 70 GiB" "$t/out" || fail "dry run split 
 grep -q "Dry run: nothing changed" "$t/out" || fail "dry run notice missing"
 ! grep -q '^MUTATE' "$FAKE_LOG" || fail "dry run mutated disk"
 echo "ok - dry-run computes MinimumSize + 20 GiB macOS keep (230 -> 70 GiB) and changes nothing"
+grep -q "pmset -a autorestart 1 and read it back (now '0')" "$t/out" || fail "dry run plan lacks the power-cut step: $(cat "$t/out")"
+[[ ! -e $t/pmset.state ]] || fail "dry run changed the power-failure setting"
+! grep -qvx -- '-g' "$t/pmset.log" || fail "dry run called pmset with more than -g: $(cat "$t/pmset.log")"
+echo "ok - dry-run plans 'pmset -a autorestart 1' (read back) and does not change it"
+
+# 2b. The power-cut setting (WS7/F9): set from macOS before any disk change, read back, refuse if it does not stick
+for mode in fail nostick; do
+  reset_state_clean normal
+  if [[ $mode == fail ]]; then export PMSET_FAIL=1; else export PMSET_STICK=0; fi
+  "$t/mi" --payload "$PAY" --sha256 "$PSHA" --installer-data "$IDATA" --firstboot-env "$t/fb.env" --yes >"$t/out" 2>&1 \
+    && fail "install went on although autorestart could not be set ($mode)"
+  unset PMSET_FAIL PMSET_STICK
+  grep -q "Nothing on disk was changed" "$t/out" || fail "pmset $mode: wrong refusal: $(cat "$t/out")"
+  ! grep -q '^MUTATE' "$FAKE_LOG" || fail "pmset $mode: the install changed the disk before the power-cut setting: $(cat "$FAKE_LOG")"
+done
+reset_state_clean normal
+"$t/mi" --payload "$PAY" --sha256 "$PSHA" --installer-data "$IDATA" --firstboot-env "$t/fb.env" --yes >"$t/out" 2>&1 || fail "install with pmset ok failed: $(tail -8 "$t/out")"
+[[ $(cat "$t/pmset.state") == 1 ]] || fail "autorestart was not set to 1: $(cat "$t/pmset.log")"
+grep -qx -- '-a autorestart 1' "$t/pmset.log" || fail "pmset -a autorestart 1 was not called: $(cat "$t/pmset.log")"
+grep -q "pmset autorestart 1, read back" "$t/out" || fail "no read-back line in the output"
+grep -q '^MUTATE' "$FAKE_LOG" || fail "install did not mutate anything"
+echo "ok - the install sets pmset autorestart 1 before any disk change, reads it back, and refuses to go on if it does not stick"
 
 # 3. Full --yes install + SHA-256 readback + ESP staging + bless
+reset_state_clean normal
+rm -f "$t/dev/rdisk0s3" "$t/dev/rdisk0s4"
 SMARTROOM_MAC_FIRMWARE_DIR="$t/fw" "$t/mi" --payload "$PAY" --sha256 "$PSHA" --installer-data "$IDATA" \
   --firstboot-env "$t/fb.env" --yes --reboot >"$t/out" 2>&1 || fail "full install failed: $(cat "$t/out")"
 grep -q "MUTATE resizeContainer disk0s2 75161927680" "$FAKE_LOG" || fail "resizeContainer wrong: $(cat "$FAKE_LOG")"

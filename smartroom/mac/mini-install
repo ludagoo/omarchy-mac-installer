@@ -10,6 +10,9 @@
 # Without --yes it checks all preconditions (F7/F20 protection) and prints
 # the partition/install plan; nothing on disk changes.
 # With --yes it:
+#   0. sets "start up automatically after a power failure" (pmset -a autorestart 1,
+#      read back; refuses to go on if it does not stick: Linux cannot set it on
+#      a T2 mini);
 #   1. verifies the payload ZIP, MANIFEST SHA-256 digests, and firstboot.env;
 #   2. saves macOS's NVRAM boot path (efi-boot-device + efi-boot-device-data)
 #      before altering anything;
@@ -331,8 +334,19 @@ linux_target_bytes=$((alloc_total - esp_bytes))
 [ "$linux_target_bytes" -ge "$root_img_zip_bytes" ] ||
   die "Linux partition target ($linux_target_bytes bytes) < root.img ($root_img_zip_bytes bytes)"
 
+# ---- Power-cut policy (F9, WS7) ---------------------------------------------
+# A T2 Mac mini keeps "start up automatically after a power failure" in the
+# T2/SMC. Linux cannot read or write it on this model, so it has to be set
+# from macOS now, before the disk is touched; without it a room stays off
+# after a power cut. Read-only here; --yes sets it and refuses to go on
+# unless it reads back as 1.
+autorestart_now() { pmset -g 2>/dev/null | awk '$1 == "autorestart" { print $2; exit }'; }
+autorestart_state=$(autorestart_now || true)
+case $autorestart_state in 1) autorestart_say="already 1" ;; *) autorestart_say="now '${autorestart_state:-unknown}'" ;; esac
+
 echo "Plan ($disk):"
 echo "  protected: ${P_ID[0]} (Apple EFI, $apple_efi_uuid), ${P_ID[1]} (macOS APFS, $mac_store_uuid)"
+echo "  0. before any disk change: pmset -a autorestart 1 and read it back ($autorestart_say); refuse if it does not read back 1"
 if [ "$mode" = resize ]; then
   echo "  1. shrink $mac_id from $((mac_cur / GiB)) GiB to $((resize_mac_to / GiB)) GiB (min $((mac_min / GiB)) GiB)"
 else
@@ -349,6 +363,11 @@ if [ "$yes" -eq 0 ]; then
 fi
 
 # ---- 4. Execute install -----------------------------------------------------
+pmset -a autorestart 1 >/dev/null 2>&1 || die "pmset -a autorestart 1 failed; the room would stay off after a power cut. Nothing on disk was changed."
+[ "$(autorestart_now || true)" = 1 ] ||
+  die "pmset autorestart did not read back as 1; the room would stay off after a power cut. Nothing on disk was changed."
+echo "power: this Mac starts up by itself after a power failure (pmset autorestart 1, read back)"
+
 mkdir -p "$state"; chmod 700 "$state"
 run="$state/run-$(date +%Y%m%d-%H%M%S)-$$"
 mkdir -m 700 "$run"

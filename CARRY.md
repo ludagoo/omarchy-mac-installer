@@ -141,9 +141,10 @@ that does.
 makes `desk-check` fail if the unit, its Studio-only condition or the kernel's
 `macsmc-reboot` `ac_power_mode` switch is missing from an image. `mac/engine-install`
 runs `pmset -a autorestart 1` at install (not on `--retry` or a dry run) and
-says whether it read back. A T2 Mac mini cannot be set from Linux; its
-installer (the unmerged `macos-install` path) must run the same `pmset` before
-the wipe. A real power cut is still untested:
+says whether it read back. A T2 Mac mini cannot be set from Linux; `mac/mini-install` runs the
+same `pmset` before it touches the disk and, unlike the Studio's installer,
+refuses to go on if the setting does not read back as 1 (a mini has no
+Linux-side fallback). A real power cut is still untested:
 `cold-boot-checks.md#power-cut-test-for-lucas`.
 
 ## Building
