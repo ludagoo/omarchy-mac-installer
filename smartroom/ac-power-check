@@ -1,0 +1,38 @@
+#!/bin/bash
+# The Studio comes back after a power cut: what the image must carry for that.
+#   smartroom/ac-power-check ROOT KVER
+# ROOT is the image root (desk-check mounts it read-only), KVER its kernel.
+# Prints one PASS/FAIL line per fact; exits non-zero on any FAIL. Facts:
+#  - smartroomos-ac-power (the tool) is executable and its unit is enabled at
+#    multi-user.target, so the PMU's power-on policy is set at every boot;
+#  - the unit runs on a 2023 Studio only (j475c, j475d device trees);
+#  - the kernel can set the policy: macsmc-reboot carries `ac_power_mode`
+#    (the kernel's own switch), or the tool's SPMI nvmem fallback is present.
+# Whether the Studio really powers on after a cut is a hardware test, not this.
+set -uo pipefail
+m=${1:?Usage: smartroom/ac-power-check ROOT KVER}
+kver=${2:?Usage: smartroom/ac-power-check ROOT KVER}
+fails=0
+pass() { echo "PASS $*"; }
+failed() { echo "FAIL $*"; fails=$((fails + 1)); }
+check() { local what=$1; shift; if "$@" >/dev/null 2>&1; then pass "$what"; else failed "$what"; fi; }
+unit=$m/usr/lib/systemd/system/smartroomos-ac-power.service
+tool=$m/usr/local/sbin/smartroomos-ac-power
+check "power-on after a power cut: smartroomos-ac-power is executable" test -x "$tool"
+check "power-on after a power cut: smartroomos-ac-power.service enabled at multi-user.target" \
+  test -L "$m/etc/systemd/system/multi-user.target.wants/smartroomos-ac-power.service"
+check "power-on after a power cut: the unit runs on a 2023 Studio only (j475c, j475d)" \
+  bash -c 'grep -qx "ConditionFirmware=|device-tree-compatible(apple,j475c)" "$1" && grep -qx "ConditionFirmware=|device-tree-compatible(apple,j475d)" "$1"' _ "$unit"
+check "power-on after a power cut: the unit runs every boot (multi-user.target, no ConditionFirstBoot)" \
+  bash -c 'grep -qx "WantedBy=multi-user.target" "$1" && ! grep -q "^ConditionFirstBoot" "$1"' _ "$unit"
+ko=$(find "$m/usr/lib/modules/$kver" -name 'macsmc-reboot.ko*' 2>/dev/null | head -n 1)
+reader=cat
+case $ko in *.zst) reader="zstd -dc" ;; *.xz) reader="xz -dc" ;; *.gz) reader="gzip -dc" ;; esac
+if [[ -n $ko ]] && $reader "$ko" 2>/dev/null | grep -aq 'ac_power_mode'; then
+  pass "power-on after a power cut: the kernel's macsmc-reboot has ac_power_mode (${ko##*/})"
+elif [[ -x $tool ]] && grep -q 'pm-setting' "$tool"; then
+  pass "power-on after a power cut: no ac_power_mode in the kernel; the tool's nvmem pm-setting fallback is present"
+else
+  failed "power-on after a power cut: the kernel has no ac_power_mode and the tool has no nvmem fallback"
+fi
+(( fails == 0 ))
