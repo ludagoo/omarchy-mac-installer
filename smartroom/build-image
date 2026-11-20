@@ -8,15 +8,27 @@
 # AUTHORIZED_KEYS the admin public keys. OUT must not exist yet.
 # --firmware-repo URL|PATH clones the firmware from elsewhere (the GitHub repo
 # is private: a git bundle made on a machine that can read it works).
+#
+# The image is a release (PROGRAM decision 4) unless --dev: one exact package
+# set, written to OUT/release/VERSION as the signed repository
+# [smartroom-release] (the database signed here with the key.fpr key, which
+# never leaves this host), and the room's pacman.conf names only that
+# repository at BASE/VERSION. Publish OUT/release/VERSION there.
+#   --release-version VERSION  default YYYY.MM.DD-studio-LANE (UTC)
+#   --release-base BASE        default https://smartroom.goossen.dev/releases
+#   --dev                      follow the live channel instead (no release)
 set -euo pipefail
 here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-inputs="" recovery="" cache="" packages="" firmware="" keys=""
+inputs="" recovery="" cache="" packages="" firmware="" keys="" dev=false
+release_version="" release_base=https://smartroom.goossen.dev/releases
 firmware_repo=https://github.com/ludagoo/smartroomcontrollerfirmware.git
 while (($# > 1)); do
   case $1 in
+    --dev) dev=true; shift; continue ;;
     --inputs) inputs=$2 ;; --recovery-app) recovery=$2 ;; --cache) cache=$2 ;;
     --packages) packages=$2 ;; --firmware) firmware=$2 ;; --keys) keys=$2 ;;
     --firmware-repo) firmware_repo=$2 ;;
+    --release-version) release_version=$2 ;; --release-base) release_base=${2%/} ;;
     *) break ;;
   esac
   shift 2
@@ -25,6 +37,12 @@ out=${1:?Usage: see the header}
 [[ -n $inputs && -n $recovery && -n $cache && -d $packages/repo && -n $firmware && -f $keys ]] ||
   { echo "missing an option (see the header)" >&2; exit 64; }
 [[ ! -e $out ]] || { echo "$out exists" >&2; exit 1; }
+channel=$(sed -n 's/^omarchy_channel=//p' "$inputs")
+if $dev; then
+  [[ -z $release_version ]] || { echo "--dev builds no release; drop --release-version" >&2; exit 64; }
+else
+  release_version=${release_version:-$(date -u +%Y.%m.%d)-studio-${channel:-unknown}}
+fi
 dir=$(mktemp -d); trap 'rm -rf "$dir"' EXIT
 cp -a "$packages/repo" "$dir/repo"
 cp "$packages/key.asc" "$packages/key.fpr" "$dir/"
@@ -33,6 +51,10 @@ mkdir -p "$dir/setup/firmware"
 install -m 0755 "$here/room/setup-run" "$dir/setup/run"
 cp "$here/room/overlay-exclude" "$here/room/smartroom-wired.nmconnection" "$dir/setup/"
 cp "$keys" "$dir/setup/authorized_keys"
+if ! $dev; then
+  printf 'version=%s\nurl=%s/%s\n' "$release_version" "$release_base" "$release_version" >"$dir/release"
+  python3 "$here/../image-builder/builder/release_repo.py" check-release "$dir/release" >/dev/null || exit 64
+fi
 git clone -q "$firmware_repo" "$dir/fw"
 git -C "$dir/fw" checkout -q "$firmware"
 firmware=$(git -C "$dir/fw" rev-parse HEAD)
@@ -40,7 +62,6 @@ git -C "$dir/fw" archive HEAD bin configs overlay studio-install/firstboot.sh \
   builder/packages-target.aarch64 builder/image/rootfs | tar -x -C "$dir/setup/firmware"
 printf '%s\n' "$firmware" >"$dir/setup/firmware/COMMIT"
 version=$(date -u +%Y.%m.%d)
-channel=$(sed -n 's/^omarchy_channel=//p' "$inputs")
 release=$(sed -n 's/^release_tag=//p' "$inputs")
 {
   printf 'built_at=%s\niso_version=%s\nbase=omarchy-mac %s (%s)\n' \
@@ -53,6 +74,11 @@ release=$(sed -n 's/^release_tag=//p' "$inputs")
   else
     printf 'bootloader=limine\n'
   fi
+  if $dev; then
+    printf 'release=dev\n'
+  else
+    printf 'release=%s\nrelease_url=%s/%s\n' "$release_version" "$release_base" "$release_version"
+  fi
 } >"$dir/setup/build-info"
 # Our packages keep their version across same-day rebuilds: never let the
 # package cache hand pacman an older build under the same file name.
@@ -60,3 +86,7 @@ for f in "$packages"/repo/*.pkg.tar.*; do rm -f "$cache/pkg/${f##*/}"; done
 cd "$here/.."
 image-builder/bin/build-mac-image --inputs "$inputs" --recovery-app "$recovery" --cache "$cache" --smartroom "$dir" "$out"
 cp "$dir/setup/build-info" "$out/build-info.txt"
+if ! $dev; then
+  "$here/release-check" "$out/release/$release_version" "$(<"$packages/key.fpr")" "$packages/key.asc"
+  echo "Release $release_version: publish $out/release/$release_version at $release_base/$release_version"
+fi
