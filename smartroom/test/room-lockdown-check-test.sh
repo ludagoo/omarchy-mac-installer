@@ -47,7 +47,9 @@ EOF
 Cmnd_Alias SR_SNAPSHOT = \
     /usr/local/bin/smartroomos-snapshot ^(status|list) --json$, \
     /usr/local/bin/smartroomos-snapshot ^(protect|unprotect|delete) [0-9]+ --json$
-Cmnd_Alias SR_ROLLBACK = /usr/local/bin/smartroom-rollback ^status --json$
+Cmnd_Alias SR_ROLLBACK = \
+    /usr/local/bin/smartroom-rollback ^status --json$, \
+    /usr/local/sbin/smartroom-rollback ^status --json$
 Cmnd_Alias SR_RELEASE = \
     /usr/bin/smartroom-release ^(status|list) --json$, \
     /usr/bin/smartroom-release ^restore [0-9]+ --no-reboot --json$
@@ -105,6 +107,8 @@ must_fail "pacman in sudoers" "no shell" \
   sed -i 's|^Cmnd_Alias SR_REBOOT = .*|Cmnd_Alias SR_REBOOT = /usr/bin/systemctl reboot, /usr/bin/pacman|' "$r/etc/sudoers.d/smartroomcontroller"
 must_fail "no reboot rule" "systemctl reboot" \
   sed -i 's|^Cmnd_Alias SR_REBOOT = .*|Cmnd_Alias SR_REBOOT = /usr/bin/true|' "$r/etc/sudoers.d/smartroomcontroller"
+must_fail "no sbin smartroom-rollback rule" "smartroom-rollback status --json" \
+  sed -i '/\/usr\/local\/sbin\/smartroom-rollback/d' "$r/etc/sudoers.d/smartroomcontroller"
 must_fail "foot installed" "foot not installed" mkdir -p "$r/var/lib/pacman/local/foot-1.20-1"
 must_fail "kitty installed" "kitty not installed" mkdir -p "$r/var/lib/pacman/local/kitty-0.40-1"
 must_fail "a terminal bind (conf)" "no key binds or exec in hyprland.conf" \
