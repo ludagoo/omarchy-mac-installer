@@ -5,8 +5,8 @@ How to put SmartRoom Firmware beside macOS on an Apple Silicon Zoom-room Mac
 SmartRoom Firmware off again. Everything is done over SSH except one step at
 the Mac (Apple's 1TR step, with a USB keyboard; a display is optional).
 
-The tools are in this repository (ludagoo/omarchy-mac-installer, branch
-`smartroom/main`):
+The tools are in this repository (ludagoo/omarchy-mac-installer, branches
+`smartroom/main` and `smartroom/edge`):
 
 | Tool | Runs on | Does |
 | --- | --- | --- |
@@ -90,13 +90,26 @@ the freed space (`diskutil addPartition disk0s2 %Linux% %noformat% <bytes>B`), t
 Firmware `btrfs device add -f /dev/<new partition> /` (done on the home Studio 2026-11-17; the
 two-device root boots normally).
 
+## 2b. Which image to install
+
+On the Mini, in `~/smartroom-omarchy-fork/release/`:
+
+| Image | Use |
+| --- | --- |
+| `smartroom-edge-2026.11.20/` | **Install this one.** Built 2026-11-20 on studio-build from installer `smartroom/edge` `ddc216c`, packages `smartroom/edge` `7809f7c` (kernel 7.3.0 `d77dde4`, aura `13fb868`, `mesa-aurora` `23791c1` that opens the kernel's `aurora` GPU driver, `chromium-smartroom`), firmware `omarchy-base` `af9323e`. Desk-check passes (76 lines, including "Mesa opens the kernel's GPU driver (aurora)"). Cold-boot checks on the home Studio passed on this package set: no screen, no network at boot, crash then reboot ([cold-boot-checks.md](cold-boot-checks.md)). sha256 in its `SHA256`. |
+| `smartroom-3/` | **Do not install.** Installer `6dcf34a` predates the zero-touch fixes: Limine file checksums are on (a changed boot file stops it at "Press Y to continue", the 3-hour hang of 2026-11-18) and `panic=10` is missing. |
+| `smartroom-2/`, `smartroom/`, `baseline/` | Older; do not install. |
+
+Later images are built by the same recipe ([cold-boot-checks.md](cold-boot-checks.md),
+"Build"); this table names the one to use today.
+
 ## 3. Install
 
 From the Mini, copy the tools and the release to the Mac (`MAC` is the Mac's
 address, `ADMIN` the owner account):
 
 ```sh
-REL=~/smartroom-omarchy-fork/release/smartroom-3
+REL=~/smartroom-omarchy-fork/release/smartroom-edge-2026.11.20
 REPO=~/smartroom-omarchy-fork/work/omarchy-mac-installer
 ssh ADMIN@MAC 'mkdir -p smartroom/smartroom/mac smartroom/Engine smartroom/Packaging smartroom/image'
 scp $REPO/smartroom/mac/engine-install $REPO/smartroom/mac/remove-firmware $REPO/smartroom/mac/smartroom-boot-os ADMIN@MAC:smartroom/smartroom/mac/
@@ -145,6 +158,12 @@ the Mac already has free space. Then install (tens of minutes; most is writing R
 ```sh
 sudo smartroom/mac/engine-install "${args[@]}" --yes
 ```
+
+Before the engine writes anything it sets macOS's "Start up automatically
+after a power failure" (`pmset -a autorestart 1`) and reads it back, so a
+power cut during the install or at 1TR brings the Mac back. A failure only
+warns. After the first Linux boot the Studio's power-on policy is set again
+by `smartroomos-ac-power` at every boot.
 
 It ignores a dropped SSH session; the log is
 `/var/root/omarchy-engine-install/run-*/engine-install.log`
@@ -306,6 +325,9 @@ Tested only on Linux against simulated macOS tools (each tool's
   an owner, `nvram alt-boot-volume` read-back, and the switching behaviour
   above.
 - The Mac mini (not the Studio): its Ethernet and the image's device tree.
+- A real power cut: the Studio's power-on policy reads and writes on the home
+  Studio, but nobody has pulled the plug (the exact test is in
+  [cold-boot-checks.md](cold-boot-checks.md#power-cut-test-for-lucas)).
 - Apple's `/bin/bash` 3.2: the macOS scripts' tests pass under GNU bash
   3.2.57 built on Linux (`TEST_BASH=<bash-3.2> bash smartroom/test/<tool>-test.sh`),
   not under Apple's build.

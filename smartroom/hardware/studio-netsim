@@ -1,0 +1,58 @@
+#!/bin/bash
+# Simulate an unplugged Ethernet cable at boot on a Studio, with no change to NetworkManager's
+# profile or config (the drop-in lives in /run and is gone at any reboot). Run on the Studio, as root.
+#   studio-netsim install                the one-shot unit (test only; `studio-netsim remove` deletes it)
+#   studio-netsim arm [seconds]          the NEXT boot only: end0 unmanaged for N seconds (default 300)
+#   studio-netsim start | stop | stop-hard   (the unit and its timers call these)
+# `stop` removes the drop-in and reloads NetworkManager; `stop-hard` (two minutes later) restarts
+# NetworkManager if there is still no default route, so a room never stays offline because of this test.
+# An unplugged cable cannot be done remotely; this is the closest thing that does not touch the room's
+# network settings. What it proves: boot reaches multi-user with no network and nothing waits for it, and
+# the room recovers by itself when the "cable" returns (NetworkManager re-activates the unchanged profile,
+# the agent registers again). What it does not prove: the Ethernet PHY's own link-up behaviour.
+set -u
+IFACE=${NETSIM_IFACE:-end0}
+RUN=${NETSIM_RUN_DIR:-/run/NetworkManager/conf.d}
+STATE=${NETSIM_STATE_DIR:-/var/lib/smartroom-hardware-test}
+UNIT=${NETSIM_UNIT:-/etc/systemd/system/studio-netsim.service}
+D=$RUN/99-studio-netsim.conf
+self=$(readlink -f -- "${BASH_SOURCE[0]}")
+case ${1:-} in
+  install)
+    install -d "$STATE"; install -m 0755 "$self" "$STATE/studio-netsim"
+    cat >"$UNIT" <<UNITEOF
+[Unit]
+Description=Hardware test: simulate an unplugged Ethernet cable at this boot (runtime only)
+ConditionPathExists=$STATE/netsim-armed
+DefaultDependencies=no
+After=local-fs.target
+Before=NetworkManager.service network-pre.target
+[Service]
+Type=oneshot
+ExecStart=$STATE/studio-netsim start
+[Install]
+WantedBy=sysinit.target
+UNITEOF
+    systemctl daemon-reload; systemctl enable studio-netsim.service ;;
+  remove)
+    systemctl disable studio-netsim.service 2>/dev/null; rm -f "$UNIT" "$STATE/netsim-armed" "$STATE/studio-netsim"; systemctl daemon-reload ;;
+  arm) install -d "$STATE"; echo "${2:-300}" >"$STATE/netsim-armed" ;;
+  start)
+    secs=$(cat "$STATE/netsim-armed" 2>/dev/null || echo 300)
+    rm -f "$STATE/netsim-armed"
+    install -d "$RUN"
+    printf '[keyfile]\nunmanaged-devices=interface-name:%s\n' "$IFACE" >"$D"
+    logger -t studio-netsim "$IFACE unmanaged for ${secs}s (simulated unplugged cable)"
+    systemd-run --no-block --on-active="${secs}s" --unit=studio-netsim-restore "$STATE/studio-netsim" stop
+    systemd-run --no-block --on-active="$((secs + 120))s" --unit=studio-netsim-restore2 "$STATE/studio-netsim" stop-hard ;;
+  stop)
+    rm -f "$D"
+    logger -t studio-netsim "$IFACE handed back to NetworkManager (simulated cable plugged in)"
+    nmcli general reload conf 2>&1 | logger -t studio-netsim ;;
+  stop-hard)
+    rm -f "$D"
+    ip route show default | grep -q . && exit 0
+    logger -t studio-netsim "no default route after the restore: restarting NetworkManager"
+    systemctl restart NetworkManager ;;
+  *) sed -n '2,13p' "$self" | sed 's/^# \{0,1\}//'; exit 2 ;;
+esac
