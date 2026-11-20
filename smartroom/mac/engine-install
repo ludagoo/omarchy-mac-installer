@@ -23,6 +23,10 @@
 # engine blesses it with --setBoot, as asahi does, so step 2 in 1TR needs one
 # pass); this checks that again on its own and re-blesses if it is not.
 #
+# Before the engine writes anything, this sets macOS's "Start up automatically
+# after a power failure" (pmset -a autorestart 1) and reads it back; a failure
+# only warns (smartroomos-ac-power sets the Studio's policy at every Linux boot).
+#
 # The owner's macOS password is the first line of standard input. It is only
 # ever written to the engine's standard input, never to argv, env or a file.
 # Without --yes it stops after the engine's plan; nothing on disk changes.
@@ -506,6 +510,22 @@ if (( ! yes )); then
   echo "checked; nothing on disk changed. Add --yes to install."
   exit 0
 fi
+
+# The room must come back by itself after a power cut, from the first minute:
+# macOS's own setting "Start up automatically after a power failure" (the PMU's
+# power-on policy, a byte that survives into Linux). Linux sets the Studio's
+# byte again at every boot (smartroomos-ac-power); this covers the install and
+# 1TR in between. A failure here is a warning, never a reason to stop.
+power_failure_restart() {
+  pmset -a autorestart 1 >/dev/null 2>&1 || true
+  if [[ $(pmset -g 2>/dev/null | awk '$1 == "autorestart" { print $2; exit }') == 1 ]]; then
+    say "power: this Mac starts up by itself after a power failure (pmset autorestart 1)"
+  else
+    echo "WARNING: could not set or read back 'pmset -a autorestart 1'. The room will stay off after a power cut" \
+      "until SmartRoom Firmware's first boot sets it (smartroomos-ac-power); set it by hand if this Mac must survive one before then." >&2
+  fi
+}
+[[ -n $retry ]] || power_failure_restart
 
 mode=install
 [[ -z $retry ]] || mode=retry-recovery-authorization

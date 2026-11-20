@@ -158,6 +158,15 @@ printf '#!/bin/bash\n[[ $1 == -s ]] && echo Darwin && exit 0; [[ $1 == -m ]] && 
 printf '#!/bin/bash\nshift 2; exec sha256sum "$@"\n' >"$mock/shasum"
 printf '#!/bin/bash\n[[ $1 == -f && $2 == %%z ]] && exec /usr/bin/stat -c %%s "$3"; exec /usr/bin/stat "$@"\n' >"$mock/stat"
 printf '#!/bin/bash\nexit 0\n' >"$mock/caffeinate"
+# pmset: -a autorestart N is remembered in $t/pmset.state; -g prints it; PMSET_FAIL=1 refuses.
+cat >"$mock/pmset" <<SH
+#!/bin/bash
+echo "\$*" >>"$t/pmset.log"
+[[ \${PMSET_FAIL-} == 1 ]] && exit 1
+if [[ \$1 == -a && \$2 == autorestart ]]; then echo "\$3" >"$t/pmset.state"; exit 0; fi
+if [[ \$1 == -g ]]; then printf 'System-wide power settings:\\nCurrently in use:\\n standby 1\\n autorestart          %s\\n' "\$(cat "$t/pmset.state" 2>/dev/null || echo 0)"; exit 0; fi
+exit 0
+SH
 printf '#!/bin/bash\nexec /usr/bin/uuidgen -r\n' >"$mock/uuidgen"
 chmod +x "$mock"/*
 
@@ -364,6 +373,7 @@ grep -q "checked; nothing on disk changed" "$t/out" && grep -q "chosen: free dis
 [[ $(disk) == "$initial" ]] || fail "the dry run changed the disk"
 ! ls "$st"/run-*/package/*.zip >/dev/null 2>&1 || fail "the dry run left its payload copy"
 echo "ok - dry run: the engine's own planner accepts the plan, nothing changes"
+[[ ! -e $t/pmset.log ]] || fail "the dry run called pmset: $(cat "$t/pmset.log")"
 
 # wrong password: stops at the Recovery handoff; a fresh install is then refused; --retry finishes
 sleep 1
@@ -388,6 +398,10 @@ grep -q 'SmartRoom Firmware Installer opens on its "Finish setup" screen' "$t/ou
   fail "the 1TR steps name Omarchy: $(sed -n '/^== Stage 1 done/,/^Run record/p' "$t/out" | grep -in omarchy)"
 ! grep -rqF "$PW" "$st" || fail "the password is in the state directory"
 echo "ok - ESP has install.conf encrypt=0 and firstboot.env; the stub is the default startup disk; 1TR steps printed"
+# power cut: macOS is told to start up by itself after a power failure, once, before the engine writes
+[[ $(cat "$t/pmset.state") == 1 ]] || fail "pmset autorestart was not set to 1: $(cat "$t/pmset.log")"
+[[ $(grep -c -x -- '-a autorestart 1' "$t/pmset.log") == 1 ]] || fail "pmset -a autorestart 1 was not called exactly once (the retry does not repeat it): $(cat "$t/pmset.log")"
+echo "ok - the install sets 'Start up automatically after a power failure' (pmset autorestart 1), not on a dry run or a retry"
 
 # a fresh Mac where the engine's bless did not stick: the driver re-blesses
 cp "$t/disk.initial.json" "$state"; rm -rf "$t/vol"/* "$st"
@@ -397,6 +411,12 @@ grep -q "the startup disk is not SmartRoom Firmware" "$t/out" || fail "no re-ble
 [[ $(disk) == *" disk5s1" ]] || fail "not the default after re-bless: $(disk)"
 grep -q -- "--setBoot --device /dev/disk5s1 --user lucas --stdinpass" "$t/bless.log" || fail "bless log: $(cat "$t/bless.log")"
 echo "ok - re-blesses the stub when the engine's bless did not take"
+
+# pmset refuses: a warning, and the install goes on
+cp "$t/disk.initial.json" "$state"; rm -rf "$t/vol"/* "$st"; rm -f "$t/pmset.state"
+pw "$PW" | PMSET_FAIL=1 run "${common[@]}" --firstboot-env "$t/fb.env" --yes || fail "install with pmset failing: $(tail -8 "$t/out")"
+grep -q "WARNING: could not set or read back 'pmset -a autorestart 1'" "$t/out" || fail "no pmset warning: $(tail -8 "$t/out")"
+echo "ok - if pmset fails the install warns and continues (the Studio's first boot sets the policy)"
 
 # no free space: shrink macOS (resize candidate) by --source/--size
 python3 - "$state" "$t/disk.initial.json" <<'PY'
