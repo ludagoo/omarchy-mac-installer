@@ -16,14 +16,22 @@ fw=$here/firmware
 [[ -d $fw/overlay && -x $fw/bin/smartroomos-studio-setup && -f $here/authorized_keys && -f $here/smartroom-wired.nmconnection ]] ||
   { echo "setup: firmware/ or authorized_keys missing" >&2; exit 1; }
 
+# overlay-exclude is read top to bottom and the last pattern that matches a
+# path decides. A line starting with ! puts a path back (it is ours on the
+# Studio too), like .gitignore.
 excluded() {
-  local pattern
+  local pattern verdict=1
   while read -r pattern; do
     [[ -n $pattern && $pattern != \#* ]] || continue
-    # shellcheck disable=SC2053
-    [[ $1 == $pattern ]] && return 0
+    if [[ $pattern == '!'* ]]; then
+      # shellcheck disable=SC2053
+      [[ $1 == ${pattern:1} ]] && verdict=1
+    else
+      # shellcheck disable=SC2053
+      [[ $1 == $pattern ]] && verdict=0
+    fi
   done <"$here/overlay-exclude"
-  return 1
+  return $verdict
 }
 
 # Our overlay without what the Omarchy base owns. The studio setup copies it
