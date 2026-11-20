@@ -102,6 +102,12 @@ sys.exit(open(sys.argv[2], "rb").read() not in open(sys.argv[1], "rb").read())' 
     check "j475c device tree: encoder auxiliary DMA $node disabled" \
       test "$(fdtget -t s "$j475c" "/soc/$node" status 2>/dev/null)" = disabled
   done
+  j475c_disp=$(dirname -- "${BASH_SOURCE[0]}")/../image-builder/builder/j475c_display_dtb.py
+  if out=$(python3 "$j475c_disp" "$j475c" 2>&1); then
+    pass "j475c device tree: $out"
+  else
+    failed "j475c device tree multi-display topology: $out"
+  fi
   # The SMC sensor tree: the driver discovers the temperature keys only when
   # the tree lists no temperature channel of its own, so TH0x must be gone.
   hwmon=/soc/smc@2a2400000/hwmon
