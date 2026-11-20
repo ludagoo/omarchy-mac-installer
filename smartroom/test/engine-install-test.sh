@@ -361,7 +361,11 @@ pw "$PW" | run "${common[@]}" --firstboot-env "$t/bad.env" && fail "a firstboot.
 grep -q "SMARTROOMOS_AGENT_INSTALL_SHA256" "$t/out" || fail "wrong refusal: $(tail -3 "$t/out")"
 pw "$PW" | CONSOLE_USER="" "$ei" "${common[@]}" --firstboot-env "$t/fb.env" >"$t/out" 2>&1 && fail "ran with no console user"
 grep -q "no user is logged in at this Mac's console" "$t/out" || fail "wrong refusal: $(tail -3 "$t/out")"
-pw "$PW" | run "${common[@]/lucas/nobody}" --firstboot-env "$t/fb.env" && fail "a non-owner was accepted"
+# Only the --owner value changes: a ${common[@]/lucas/nobody} would also rewrite every path that contains
+# "lucas" (a scratch dir under /home/lucas), and the run would stop at "missing --payload" instead.
+other=(); prev=""
+for a in "${common[@]}"; do [[ $prev == --owner ]] && a=nobody; other+=("$a"); prev=$a; done
+pw "$PW" | run "${other[@]}" --firstboot-env "$t/fb.env" && fail "a non-owner was accepted"
 grep -q "nobody is not a macOS machine owner" "$t/out" || fail "wrong refusal: $(tail -3 "$t/out")"
 pw "$PW" | NO_TOKEN=lucas run "${common[@]}" --firstboot-env "$t/fb.env" && fail "an owner without a secure token was accepted"
 [[ $(disk) == "$initial" ]] || fail "a refusal changed the disk"
