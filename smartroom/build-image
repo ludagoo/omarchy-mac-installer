@@ -33,6 +33,8 @@ mkdir -p "$dir/setup/firmware"
 install -m 0755 "$here/room/setup-run" "$dir/setup/run"
 cp "$here/room/overlay-exclude" "$here/room/smartroom-wired.nmconnection" "$dir/setup/"
 cp "$keys" "$dir/setup/authorized_keys"
+# Releases are signed with the SmartRoom package key; the image trusts it for smartroom-release.
+cp "$packages/key.asc" "$dir/setup/release-key.asc"
 git clone -q "$firmware_repo" "$dir/fw"
 git -C "$dir/fw" checkout -q "$firmware"
 firmware=$(git -C "$dir/fw" rev-parse HEAD)
