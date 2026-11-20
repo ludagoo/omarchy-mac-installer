@@ -1,0 +1,68 @@
+name: SmartRoom checks
+
+# The fork's shipped branches (smartroom/main stable, smartroom/edge edge) and
+# their fix branches run the suites they carry: image-builder/test/all and
+# smartroom/test/all. No secrets: read-only checkout, public repositories only.
+# The boot leaves the SmartRoom tests exercise come from ludagoo/omarchy-mac-pkgs
+# at the same line (PKGS_REF), checked out beside this repository.
+
+on:
+  push:
+    branches: [smartroom/main, smartroom/edge, 'fix/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PKGS_REF: smartroom/edge
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  image-builder:
+    name: Image builder source checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - name: Install source-test tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libarchive-tools jq gnupg zstd xz-utils
+      - name: image-builder/test/all
+        run: TMPDIR="$RUNNER_TEMP" bash image-builder/test/all
+
+  smartroom:
+    name: SmartRoom tool tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          path: omarchy-mac-installer
+          persist-credentials: false
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          repository: ludagoo/omarchy-mac-pkgs
+          ref: ${{ env.PKGS_REF }}
+          path: omarchy-mac-pkgs
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - name: Install test tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libarchive-tools jq gnupg zstd xz-utils
+      - name: smartroom/test/all
+        env:
+          SMARTROOM_MAC_BOOT: ${{ github.workspace }}/omarchy-mac-pkgs/omarchy-mac-boot
+        run: TMPDIR="$RUNNER_TEMP" bash omarchy-mac-installer/smartroom/test/all
