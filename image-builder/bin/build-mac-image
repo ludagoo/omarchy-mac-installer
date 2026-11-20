@@ -101,7 +101,13 @@ the key in key.asc, fingerprint in key.fpr: our omarchy-mac-boot and
 smartroom-omarchy-helpers), packages (what the image installs instead of the
 runtime's lists), apple-drop (names left out of the runtime's Apple list) and
 setup/ (setup/run is run in the image root before the initramfs is built). The
-boot chain, first boot and @factory are the stock image's.
+boot chain, first boot and @factory are the stock image's. With DIR/release
+(version=, url=) the image is that release: every installed package, with its
+publisher's signature, goes into OUT/release/VERSION as the signed repository
+[smartroom-release], the image's pacman.conf names only that repository at URL,
+and the repository database is signed on this host with the key.fpr key (its
+secret key must be in this host's GnuPG). Without it the image follows the
+channel (a dev build).
 
 Needs docker, curl, gpg, python3, bsdtar and sha256sum on the host. As root or
 with passwordless sudo, it hides its loop devices from desktop automounters
@@ -125,7 +131,39 @@ sha256_of() {
 }
 
 # ── host ───────────────────────────────────────────────────────────────────
-host_work="" host_image="" host_docker="" loop_rule=""
+host_work="" host_image="" host_docker="" loop_rule="" release_signer_pid=""
+
+# SmartRoom release (fork only): the container asks for signatures by writing
+# the file names to OUT/release/VERSION/.sign-request; this signs them with
+# KEY in this host's GnuPG (the secret key stays here) and answers .signed, or
+# .sign-failed. Only plain file names inside that directory are signed.
+release_signer() {
+  local out=$1 key=$2 request dir name ok
+  while :; do
+    for request in "$out"/release/*/.sign-request; do
+      [[ -f $request ]] || continue
+      dir=${request%/.sign-request} ok=true
+      while read -r name; do
+        if [[ ! $name =~ ^[A-Za-z0-9][A-Za-z0-9._+:-]*$ || ! -f $dir/$name || -L $dir/$name ]] ||
+          ! gpg --batch --yes --local-user "$key" --detach-sign --output "$dir/$name.sig" "$dir/$name" 2>>"$out/release-signing.log"; then
+          echo "build-mac-image: could not sign ${name@Q} for the release" >&2
+          ok=false
+          break
+        fi
+      done <"$request"
+      rm -f "$request"
+      if $ok; then : >"$dir/.signed"; else : >"$dir/.sign-failed"; fi
+    done
+    sleep 1
+  done
+}
+
+stop_release_signer() {
+  [[ -n $release_signer_pid ]] || return 0
+  kill "$release_signer_pid" 2>/dev/null || true
+  wait "$release_signer_pid" 2>/dev/null || true
+  release_signer_pid=""
+}
 
 # On an interruption: docker stop reaches the container's own traps, which
 # unmount and detach; its loop devices also clear themselves once it is gone.
@@ -179,6 +217,7 @@ show_loop_devices() {
 
 host_cleanup() {
   stop_build
+  stop_release_signer
   show_loop_devices
   if [[ -n $host_work ]]; then
     chmod -R u+w "$host_work" 2>/dev/null || true
@@ -275,6 +314,12 @@ host_main() {
       -f $smartroom/apple-drop && -x $smartroom/setup/run ]] || fail "--smartroom names no SmartRoom build directory"
     smartroom=$(cd -- "$smartroom" && pwd)
     smartroom_mounts=(-v "$smartroom:/smartroom:ro")
+    if [[ -f $smartroom/release ]]; then
+      python3 "$ROOT/builder/release_repo.py" check-release "$smartroom/release" >/dev/null ||
+        fail "$smartroom/release names no release (version=, url=)"
+      gpg --batch --list-secret-keys "$(<"$smartroom/key.fpr")" >/dev/null 2>&1 ||
+        fail "a release is signed on the build host: its GnuPG has no secret key $(<"$smartroom/key.fpr")"
+    fi
   fi
 
   host_work=$(mktemp -d)
@@ -347,12 +392,17 @@ host_main() {
   rm -f "$host_work/rootfs.tar.gz"
 
   hide_loop_devices
+  if [[ -n $smartroom && -f $smartroom/release ]]; then
+    release_signer "$out" "$(<"$smartroom/key.fpr")" &
+    release_signer_pid=$!
+  fi
   # /work is an anonymous volume: loop devices need a real filesystem under
   # them, and --rm removes it with the container. In the background, so an
   # interruption reaches the traps above at once.
   docker run --rm --cidfile "$host_work/cid" --privileged --platform linux/arm64 \
     -v "$ROOT:/src:ro" -v "$inputs:/inputs:ro" -v "$host_work/candidates:/candidates:ro" \
     -v "$host_work/dbs:/dbs:ro" -v "$out:/out" -v /work "${cache_mounts[@]}" "${lab_mounts[@]}" "${recovery_mounts[@]}" "${smartroom_mounts[@]}" \
+    -e MAC_IMAGE_HOST_UID="$(id -u)" -e MAC_IMAGE_HOST_GID="$(id -g)" \
     -e MAC_IMAGE_BUILDER_COMMIT="$commit" \
     -e MAC_IMAGE_BUILDER_CLEAN="$clean" \
     -e MAC_IMAGE_BUILDER_IMAGE="$(docker image inspect --format '{{.Id}}' "$host_image")" \
@@ -362,6 +412,7 @@ host_main() {
   wait "$host_docker" || fail "the build failed (logs in $out/logs)"
   host_docker=""
   rm -f "$host_work/cid"
+  stop_release_signer
   echo "Built the Apple Silicon image in $((SECONDS - started))s:"
   ls -l "$out"
 }
@@ -380,6 +431,9 @@ test_image_pin=""
 profile=release
 lab_access_dir=/lab-access
 smartroom_dir=/smartroom
+# A SmartRoom release's repository and the package cache it is staged from.
+release_root=/out/release
+package_cache=/cache
 # The OS name the Mac's startup picker, the stub volume and the Limine entry show.
 OS_NAME=Omarchy
 lab_access_sha256=""
@@ -502,7 +556,7 @@ read_repository_order() {
 prepare_toolchain() {
   local repository sha server
   {
-    printf '[options]\nArchitecture = aarch64\nSigLevel = Required DatabaseOptional\nLocalFileSigLevel = Optional\n'
+    printf '[options]\nArchitecture = aarch64\nSigLevel = Required DatabaseOptional\nLocalFileSigLevel = Required\n'
     printf 'ParallelDownloads = 5\nCacheDir = /cache/\nDisableSandboxFilesystem\nDisableSandboxSyscalls\n'
     for repository in core extra alarm aur; do
       printf '\n[%s]\nServer = %s\n' "$repository" "$(field alarm_server)"
@@ -520,11 +574,17 @@ prepare_toolchain() {
     >>"$logs/toolchain.log" 2>&1 || fail "could not install the build tools (logs/toolchain.log)"
 
   fetch \
-    --output "$work/$ASAHI_KEYRING_FILE" "$(field asahi_alarm_server)/$ASAHI_KEYRING_FILE" ||
-    fail "could not download $ASAHI_KEYRING_FILE"
+    --output "$work/$ASAHI_KEYRING_FILE" "$(field asahi_alarm_server)/$ASAHI_KEYRING_FILE" \
+    --output "$work/$ASAHI_KEYRING_FILE.sig" "$(field asahi_alarm_server)/$ASAHI_KEYRING_FILE.sig" ||
+    fail "could not download $ASAHI_KEYRING_FILE and its signature"
   [[ $(sha256_of "$work/$ASAHI_KEYRING_FILE") == "$ASAHI_KEYRING_SHA256" ]] || fail "$ASAHI_KEYRING_FILE changed"
-  pacman -U --noconfirm --config <(sed 's/^LocalFileSigLevel = .*/LocalFileSigLevel = Never/' /etc/pacman.conf) \
-    "$work/$ASAHI_KEYRING_FILE" >>"$logs/toolchain.log" 2>&1 && pacman-key --populate asahi-alarm >>"$logs/toolchain.log" 2>&1 ||
+  # SmartRoom: the key comes from the pinned archive, and pacman still checks
+  # the archive's own signature (LocalFileSigLevel = Required) as it installs it.
+  bsdtar -xOf "$work/$ASAHI_KEYRING_FILE" usr/share/pacman/keyrings/asahi-alarm.gpg >"$work/asahi-alarm.gpg" ||
+    fail "$ASAHI_KEYRING_FILE has no asahi-alarm.gpg"
+  trust_key "$work/asahi-alarm.gpg" "$ASAHI_KEY" "the Asahi ALARM key"
+  pacman -U --noconfirm "$work/$ASAHI_KEYRING_FILE" >>"$logs/toolchain.log" 2>&1 &&
+    pacman-key --populate asahi-alarm >>"$logs/toolchain.log" 2>&1 ||
     fail "could not trust the Asahi ALARM keyring (logs/toolchain.log)"
   pacman-key --finger "$ASAHI_KEY" >/dev/null 2>&1 || fail "the Asahi ALARM keyring does not hold $ASAHI_KEY"
 
@@ -582,7 +642,7 @@ prepare_repositories() {
 # refreshed. CACHE is where archives land.
 render_config() {
   local serve=$1 cache=$2 name sha server
-  printf '[options]\nArchitecture = aarch64\nSigLevel = Required DatabaseOptional\nLocalFileSigLevel = Optional\n'
+  printf '[options]\nArchitecture = aarch64\nSigLevel = Required DatabaseOptional\nLocalFileSigLevel = Required\n'
   printf 'ParallelDownloads = 5\nCacheDir = %s/\nDisableSandboxFilesystem\nDisableSandboxSyscalls\n' "$cache"
   while read -r name sha server; do
     if [[ $server == - ]]; then
@@ -1113,8 +1173,27 @@ write_installed_config() {
   [[ -f $mirrorlist ]] || mirrorlist=$templates/mirrorlist-aarch64
   [[ -f $repositories/pacman-$channel.conf ]] || fail "the image ships no Apple Silicon pacman configuration for $channel"
   [[ -f $mirrorlist ]] || fail "the runtime ships no aarch64 mirror list for $channel"
+  # A SmartRoom release takes the template's options only: its one repository
+  # is the release's, named in /etc/pacman.d/smartroom-release.
+  if smartroom_release; then
+    python3 "$ROOT/builder/release_repo.py" config "$repositories/pacman-$channel.conf" >"$work/pacman.conf" ||
+      fail "could not write the release's pacman configuration"
+    install -m 0644 "$work/pacman.conf" "$target/etc/pacman.conf"
+    mkdir -p "$target/etc/pacman.d"
+    python3 "$ROOT/builder/release_repo.py" mirror "$(release_field version)" "$(release_field url)" \
+      >"$work/smartroom-release" || fail "could not write the release's mirror file"
+    install -m 0644 "$work/smartroom-release" "$target/etc/pacman.d/smartroom-release"
+    install -m 0644 "$mirrorlist" "$target/etc/pacman.d/mirrorlist"
+    test_image_pin=""
+    return 0
+  fi
   python3 "$ROOT/builder/test_image_pin.py" render "$repositories/pacman-$channel.conf" "$candidates/import.json" \
     >"$work/pacman.conf" || fail "could not write the test image's pacman configuration"
+  if [[ $profile == smartroom ]]; then
+    python3 "$ROOT/builder/release_repo.py" require-signatures "$work/pacman.conf" >"$work/pacman-signed.conf" ||
+      fail "the image's pacman configuration accepts unsigned packages"
+    mv "$work/pacman-signed.conf" "$work/pacman.conf"
+  fi
   install -m 0644 "$work/pacman.conf" "$target/etc/pacman.conf"
   mkdir -p "$target/etc/pacman.d"
   install -m 0644 "$mirrorlist" "$target/etc/pacman.d/mirrorlist"
@@ -1397,6 +1476,102 @@ force_zero_wait() {
     fail "limine.conf carries a file checksum (Limine would wait for a key)"
 }
 
+# SmartRoom release (fork only): $smartroom_dir/release names the release
+# (version=, url=) this image is; without it the image follows the channel.
+smartroom_release() {
+  [[ $profile == smartroom && -f $smartroom_dir/release ]]
+}
+
+release_field() {
+  sed -n "s/^$1=//p" "$smartroom_dir/release"
+}
+
+release_dir() {
+  printf '%s/%s\n' "$release_root" "$(release_field version)"
+}
+
+# The release repository, from the package record: every installed archive
+# with its publisher's signature, a repo-add database that lists exactly the
+# record, and RELEASE. The build host signs the database, PACKAGES and RELEASE
+# (release_signer), and the signed database is the image's sync database for
+# [smartroom-release], so the room resolves its release without a network sync.
+build_release_repository() {
+  smartroom_release || return 0
+  local dir
+  dir=$(release_dir)
+  [[ ! -e $dir ]] || fail "$dir already exists"
+  python3 "$ROOT/builder/release_repo.py" stage --records "$work/packages" --repositories "$repos" --cache "$package_cache" \
+    --local omarchy-candidates,smartroom --output "$dir" 2>>"$logs/release.log" ||
+    fail "could not stage the release's packages (logs/release.log)"
+  (cd "$dir" && repo-add -q smartroom-release.db.tar.gz $(cut -d'|' -f4 PACKAGES)) >>"$logs/release.log" 2>&1 ||
+    fail "could not write the release database (logs/release.log)"
+  rm -f "$dir/smartroom-release.db" "$dir"/smartroom-release.files*
+  mv "$dir/smartroom-release.db.tar.gz" "$dir/smartroom-release.db"
+  python3 "$ROOT/builder/release_repo.py" check-db --records "$dir/PACKAGES" "$dir/smartroom-release.db" 2>>"$logs/release.log" ||
+    fail "the release database is not the package record (logs/release.log)"
+  {
+    printf 'release=%s\nline=studio\nlane=%s\narch=aarch64\nurl=%s\nbuilt=%s\n' \
+      "$(release_field version)" "$lane" "$(release_field url)" "$(date -u +%FT%TZ)"
+    printf 'builder_commit=%s\nbuilder_image=%s\n' "$MAC_IMAGE_BUILDER_COMMIT" "$MAC_IMAGE_BUILDER_IMAGE"
+    printf 'packages=%s\npackage_set_sha256=%s\n' "$(wc -l <"$dir/PACKAGES")" "$(package_set_sha256)"
+    printf 'repository_sha256=%s\n' "$(sha256_of "$dir/smartroom-release.db")"
+  } >"$dir/RELEASE"
+  sign_release "$dir" smartroom-release.db PACKAGES RELEASE
+  install -m 0644 "$dir/smartroom-release.db" "$target/var/lib/pacman/sync/smartroom-release.db"
+  install -m 0644 "$dir/smartroom-release.db.sig" "$target/var/lib/pacman/sync/smartroom-release.db.sig"
+  install -d -m 0755 "$target/usr/share/smartroomos/release"
+  install -m 0644 "$dir"/{PACKAGES,PACKAGES.sig,RELEASE,RELEASE.sig} "$target/usr/share/smartroomos/release/"
+}
+
+# The image ships no pacman keyring; each Mac's first boot populates it from
+# /usr/share/pacman/keyrings (omarchy-mac-first-boot), the SmartRoom keyring
+# included when smartroom.gpg is there: a release room's repository and the
+# SmartRoom packages are signed with it. Public key only.
+install_smartroom_keyring() {
+  local keyrings=$target/usr/share/pacman/keyrings key home
+  key=$(<"$smartroom_dir/key.fpr")
+  home=$(mktemp -d)
+  install -d -m 0755 "$keyrings"
+  gpg --homedir "$home" --batch --dearmor <"$smartroom_dir/key.asc" >"$keyrings/smartroom.gpg" ||
+    fail "could not write the SmartRoom keyring"
+  [[ $(gpg --homedir "$home" --batch --show-keys --with-colons "$keyrings/smartroom.gpg" 2>/dev/null |
+    awk -F: '$1 == "fpr" { print $10; exit }') == "$key" ]] || fail "key.asc is not the key.fpr key"
+  ! gpg --homedir "$home" --batch --show-keys --with-colons "$keyrings/smartroom.gpg" 2>/dev/null | grep -q '^sec' ||
+    fail "key.asc holds a secret key"
+  rm -rf "$home"
+  printf '%s:4:\n' "$key" >"$keyrings/smartroom-trusted"
+  : >"$keyrings/smartroom-revoked"
+  chmod 0644 "$keyrings"/smartroom{.gpg,-trusted,-revoked}
+}
+
+# Asks the build host to sign NAMES in DIR and checks each signature against
+# the SmartRoom package key.
+sign_release() {
+  local dir=$1 name key check waited=0
+  shift
+  key=$(<"$smartroom_dir/key.fpr")
+  chown "${MAC_IMAGE_HOST_UID:-0}:${MAC_IMAGE_HOST_GID:-0}" "$dir"
+  rm -f "$dir/.signed" "$dir/.sign-failed"
+  printf '%s\n' "$@" >"$dir/.sign-request.new"
+  mv "$dir/.sign-request.new" "$dir/.sign-request"
+  until [[ -e $dir/.signed || -e $dir/.sign-failed ]]; do
+    ((waited++ < ${RELEASE_SIGN_TIMEOUT:-600})) || fail "the build host did not sign the release in time"
+    sleep 1
+  done
+  [[ -e $dir/.signed ]] || fail "the build host could not sign the release (release-signing.log)"
+  rm -f "$dir/.signed"
+  check=$(mktemp -d)
+  gpg --homedir "$check" --batch --quiet --import "$smartroom_dir/key.asc" 2>/dev/null
+  for name; do
+    if ! gpg --homedir "$check" --batch --status-fd 1 --verify "$dir/$name.sig" "$dir/$name" 2>/dev/null |
+      awk -v key="$key" '$2 == "VALIDSIG" && ($3 == key || $NF == key) { ok = 1 } END { exit !ok }'; then
+      rm -rf "$check"
+      fail "the release's $name is not signed by the SmartRoom package key"
+    fi
+  done
+  rm -rf "$check"
+}
+
 sealed_body() {
   if [[ $(set_kind) == channel ]]; then
     printf 'format=2\nchannel_set=%s\nchannel_db_sha256=%s\n' "$(field channel_set)" "$(field omarchy_db_sha256)"
@@ -1475,6 +1650,8 @@ configure_image() {
   arm_first_boot
   # Recorded once the boot setup, which could change packages, is done.
   record_packages
+  [[ $profile != smartroom ]] || install_smartroom_keyring
+  build_release_repository
   write_build_identity
   write_install_receipt
   [[ -s $target/boot/efi/m1n1/boot.bin && -s $target/boot/efi/EFI/BOOT/BOOTAA64.EFI ]] ||
@@ -1525,19 +1702,28 @@ pacman_repositories() {
 # /etc/pacman.conf names, so its first boot resolves packages without a network
 # sync. The build's own [omarchy-candidates] and [omarchy-aarch64] go.
 keep_installed_databases() {
-  local sync=$target/var/lib/pacman/sync repository sha entry keep=() pinned
+  local sync=$target/var/lib/pacman/sync repository sha entry keep=() pinned files
   pinned=$(repositories)
   mapfile -t keep < <(pacman_repositories "$target/etc/pacman.conf")
   ((${#keep[@]})) || fail "the image's pacman.conf names no repository"
+  files=" ${keep[*]/%/.db} "
   for repository in "${keep[@]}"; do
-    sha=$(awk -v name="$repository" '$1 == name { print $2 }' <<<"$pinned")
+    # A SmartRoom release's database is the signed one the release publishes.
+    if smartroom_release && [[ $repository == smartroom-release ]]; then
+      sha=$(sha256_of "$(release_dir)/smartroom-release.db")
+      [[ -f $sync/smartroom-release.db.sig && ! -L $sync/smartroom-release.db.sig ]] ||
+        fail "the image has no signature on its release database"
+      files+="smartroom-release.db.sig "
+    else
+      sha=$(awk -v name="$repository" '$1 == name { print $2 }' <<<"$pinned")
+    fi
     [[ $sha =~ ^[0-9a-f]{64}$ ]] || fail "the image's pacman.conf names [$repository], which the inputs pin no database for"
     [[ -f $sync/$repository.db && ! -L $sync/$repository.db ]] || fail "the image has no $repository sync database"
     verify_database "$sync/$repository.db" "$sha"
   done
   for entry in "$sync"/* "$sync"/.*; do
     [[ ${entry##*/} != . && ${entry##*/} != .. && (-e $entry || -L $entry) ]] || continue
-    [[ " ${keep[*]/%/.db} " == *" ${entry##*/} "* ]] || rm -rf -- "$entry"
+    [[ $files == *" ${entry##*/} "* ]] || rm -rf -- "$entry"
   done
 }
 

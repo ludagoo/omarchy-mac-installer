@@ -1,0 +1,65 @@
+#!/bin/bash
+# The release facts of a SmartRoom image's root (desk-check runs it on the
+# mounted @; it reads only):
+#   smartroom/release-image-check ROOT
+# Every SmartRoom image ships the SmartRoom public keyring and requires a
+# trusted signature on every package. A release image's pacman.conf names only
+# [smartroom-release] (the release in /etc/pacman.d/smartroom-release), it
+# keeps that repository's signed database, its signed PACKAGES and RELEASE
+# verify with the image's own keyring, and the installed packages are
+# PACKAGES exactly. Prints PASS/FAIL lines; exits non-zero on any FAIL.
+set -uo pipefail
+here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+root=${1:?Usage: smartroom/release-image-check ROOT}
+fails=0
+pass() { echo "PASS $*"; }
+failed() { echo "FAIL $*"; fails=$((fails + 1)); }
+check() { local what=$1; shift; if "$@" >/dev/null 2>&1; then pass "$what"; else failed "$what"; fi; }
+home=$(mktemp -d)
+trap 'rm -rf "$home"' EXIT
+keyrings=$root/usr/share/pacman/keyrings conf=$root/etc/pacman.conf mirror=$root/etc/pacman.d/smartroom-release
+release=$root/usr/share/smartroomos/release sync=$root/var/lib/pacman/sync
+
+key=$(gpg --homedir "$home" --batch --show-keys --with-colons "$keyrings/smartroom.gpg" 2>/dev/null |
+  awk -F: '$1 == "fpr" { print $10; exit }')
+check "SmartRoom keyring shipped (first boot trusts the SmartRoom package key)" \
+  test -n "$key" -a -f "$keyrings/smartroom-revoked" -a "$(cat "$keyrings/smartroom-trusted" 2>/dev/null)" = "$key:4:"
+check "SmartRoom keyring holds the public key only" \
+  bash -c '! gpg --homedir "$1" --batch --show-keys --with-colons "$2" 2>/dev/null | grep -q "^sec"' _ "$home" "$keyrings/smartroom.gpg"
+untrusted=$(grep -nE '^[[:space:]]*(SigLevel|LocalFileSigLevel|RemoteFileSigLevel)[[:space:]]*=' "$conf" 2>/dev/null |
+  grep -E '(=|[[:space:]])(Never|TrustAll|Optional|PackageNever|PackageOptional|PackageTrustAll)([[:space:]]|$)')
+check "pacman.conf accepts no package without a trusted signature" test -f "$conf" -a -z "$untrusted"
+check "pacman.conf requires local files' signatures" grep -qx 'LocalFileSigLevel = Required' "$conf"
+
+if [[ ! -e $mirror ]]; then
+  echo "release=dev (the image follows its channel)"
+else
+  version=$(sed -n 's/^# release=//p' "$mirror")
+  echo "release=$version"
+  repos=$(sed -n 's/^[[:space:]]*\[\(.*\)\][[:space:]]*$/\1/p' "$conf" | grep -vx options | paste -sd' ' -)
+  check "pacman.conf names only [smartroom-release] (no live mirror)" test "$repos" = smartroom-release
+  check "pacman.conf requires the release database's signature" grep -qx 'SigLevel = Required DatabaseRequired' "$conf"
+  check "pacman.conf takes the release from /etc/pacman.d/smartroom-release" \
+    grep -qx 'Include = /etc/pacman.d/smartroom-release' "$conf"
+  check "the mirror file names release $version at its URL" \
+    bash -c '[[ $1 =~ ^[0-9A-Za-z][0-9A-Za-z._-]{0,63}$ ]] && grep -qE "^Server = (https://|file:///)[^[:space:]]*/$1\$" "$2"' _ "$version" "$mirror"
+  check "the image keeps only the release database and its signature" \
+    test "$(ls "$sync" 2>/dev/null | paste -sd' ' -)" = "smartroom-release.db smartroom-release.db.sig"
+  gpg --homedir "$home" --batch --quiet --import "$keyrings/smartroom.gpg" 2>/dev/null
+  for pair in "$sync/smartroom-release.db" "$release/PACKAGES" "$release/RELEASE"; do
+    check "${pair#"$root"} is signed by the SmartRoom package key" bash -c \
+      'gpg --homedir "$1" --batch --status-fd 1 --verify "$2.sig" "$2" 2>/dev/null |
+        awk -v key="$3" '\''$2 == "VALIDSIG" && ($3 == key || $NF == key) { ok = 1 } END { exit !ok }'\''' \
+      _ "$home" "$pair" "$key"
+  done
+  check "RELEASE names release $version" grep -qx "release=$version" "$release/RELEASE"
+  check "the release database lists exactly PACKAGES" \
+    python3 "$here/../image-builder/builder/release_repo.py" check-db --records "$release/PACKAGES" "$sync/smartroom-release.db"
+  installed=$(for desc in "$root"/var/lib/pacman/local/*/desc; do
+    awk '/^%NAME%$/ { getline; n = $0 } /^%VERSION%$/ { getline; v = $0 } END { print n, v }' "$desc"
+  done | LC_ALL=C sort)
+  recorded=$(awk -F'|' '{ print $1, $2 }' "$release/PACKAGES" 2>/dev/null | LC_ALL=C sort)
+  check "the installed packages are the release's PACKAGES exactly" test -n "$recorded" -a "$installed" = "$recorded"
+  [[ $installed == "$recorded" ]] || diff <(echo "$recorded") <(echo "$installed") | sed -n 's/^</  release has:/p; s/^>/  installed:  /p' | head -n 20
+fi
+exit $(( fails > 0 ))

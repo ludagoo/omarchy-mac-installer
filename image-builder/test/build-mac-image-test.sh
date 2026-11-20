@@ -1008,7 +1008,7 @@ if command -v pacman >/dev/null 2>&1; then
     'm1n1-neo|1.6.1.aurora16-1|%PROVIDES%\nm1n1=1.6.1.aurora16\n\n%CONFLICTS%\nm1n1\n\n'
   boot_db asahi-alarm 'm1n1|1.6.1-1|' 'uboot-asahi|2026.07.asahi2-1|' 'asahi-scripts|20260127.1-1|'
   {
-    printf '[options]\nArchitecture = auto\nSigLevel = Never\n'
+    printf '[options]\nArchitecture = auto\nSigLevel = Required DatabaseOptional\n'
     for repository in omarchy-candidates omarchy asahi-alarm; do
       printf '[%s]\nServer = file:///nonexistent/%s\n' "$repository" "$repository"
     done

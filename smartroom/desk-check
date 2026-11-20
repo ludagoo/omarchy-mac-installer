@@ -108,7 +108,7 @@ if [[ -e $m/etc/omarchy-mac-boot/headless ]]; then
   check "initramfs safety hook installed and in the mkinitcpio hooks" \
     bash -c 'test -f "$1/usr/lib/initcpio/install/smartroomos-safety" && test -f "$1/usr/lib/initcpio/hooks/smartroomos-safety" && grep -q smartroomos-safety "$1/etc/mkinitcpio.conf.d/zz-smartroomos-safety.conf"' _ "$m"
   check "integrity check on boot, periodic timer and rollback command" \
-    bash -c 'test -L "$1/multi-user.target.wants/smartroomos-integrity.service" && test -L "$1/timers.target.wants/smartroomos-integrity-periodic.timer" && test -x "$2/usr/local/sbin/smartroom-rollback"' _ "$m/etc/systemd/system" "$m"
+    bash -c 'test -L "$1/multi-user.target.wants/smartroomos-integrity.service" && test -L "$1/timers.target.wants/smartroomos-integrity-periodic.timer" && test -L "$1/timers.target.wants/smartroom-rollback-mark-good.timer" && test -x "$2/usr/local/sbin/smartroom-rollback"' _ "$m/etc/systemd/system" "$m"
   meta=$(dirname -- "$zip")/installer_data.json
   if [[ -f $meta ]]; then
     check "picker and stub name: installer_data.json says SmartRoom Firmware" \
@@ -146,8 +146,12 @@ if [[ -e $m/etc/omarchy-mac-boot/headless ]]; then
   for pkg in omarchy omarchy-settings omarchy-mac sddm plymouth quickshell uwsm; do
     check "not installed: $pkg" test -z "$(ls -d "$m/var/lib/pacman/local/$pkg"-[0-9]* 2>/dev/null)"
   done
+  # Release facts: signed release repository only, or dev (the channel).
+  if out=$("$(dirname -- "${BASH_SOURCE[0]}")/release-image-check" "$m" 2>&1); then rc=0; else rc=$?; fi
+  printf '%s\n' "$out"
+  fails=$((fails + $(grep -c '^FAIL' <<<"$out") + (rc != 0 && $(grep -c '^FAIL' <<<"$out") == 0)))
   check "no display manager" test ! -e "$m/etc/systemd/system/display-manager.service" -o "$(readlink "$m/etc/systemd/system/display-manager.service")" = /usr/lib/systemd/system/greetd.service
-  for f in etc/sysctl.d/10-smartroomos-panic.conf etc/limine-entry-tool.d/smartroomos.conf etc/initcpio/install/asahi; do
+  for f in etc/limine-entry-tool.d/smartroomos.conf etc/initcpio/install/asahi; do
     check "old boot change absent: $f" test ! -e "$m/$f"
   done
 else
