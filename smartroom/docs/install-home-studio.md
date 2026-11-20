@@ -76,7 +76,8 @@ sudo shutdown -r now
 Second install (the SmartRoom image after the stock one), on the layout step 3
 made: `--boot diskNsB --root diskNsC` instead of `--linux disk0s5`, plus
 `--firstboot-env <file>` (SMARTROOMOS_SERVER_URL, SMARTROOMOS_AGENT_INSTALL_SHA256,
-optional SMARTROOMOS_UNIQUE_ID; the old ESP's `asahi/extras/firstboot.env` is
+optional SMARTROOMOS_UNIQUE_ID; https only, and `--production` for the production
+server; the old ESP's `asahi/extras/firstboot.env` is
 restored automatically if it was there). Then step 4 again.
 
 ## Watching from the Mini

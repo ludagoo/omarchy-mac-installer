@@ -5,7 +5,7 @@
 #
 #   install-onto-existing-stub --zip PAYLOAD.zip --sha256 HEX \
 #     --esp diskNsA --esp-partuuid UUID --linux diskNsB [--encrypt 0|1] \
-#     [--firstboot-env FILE] [--full-readback] [--yes]
+#     [--firstboot-env FILE [--production]] [--full-readback] [--yes]
 # or, on a Mac this script already installed (Boot and Root exist):
 #     ... --esp diskNsA --esp-partuuid UUID --boot diskNsB --root diskNsC ...
 #
@@ -24,13 +24,18 @@
 #      esp/ (minus the MacBook Neo's m1n1/boot-j700.bin), then this Mac's
 #      vendorfw/ and asahi/ back, then omarchy/install.conf (encrypt=0 by
 #      default; omarchy-mac-boot's own switch)
+# --firstboot-env must name an https server. The production server
+# (smartroom.goossen.dev) needs --production, which adds
+# SMARTROOMOS_PRODUCTION=1 to the ESP copy (first boot refuses production
+# without it); --production with another server is refused.
 # Without --yes it only checks and prints the plan. It never touches the stub,
 # its boot policy, macOS or any other partition. Blessing is a separate step.
 set -euo pipefail
 PATH=/usr/bin:/bin:/usr/sbin:/sbin
 die() { echo "install-onto-existing-stub: $*" >&2; exit 1; }
 say() { echo "== $*"; }
-zip="" sha="" esp="" esp_uuid="" linux="" bootp="" rootp="" encrypt=0 readback=0 yes=0 fbenv=""
+zip="" sha="" esp="" esp_uuid="" linux="" bootp="" rootp="" encrypt=0 readback=0 yes=0 fbenv="" production=0
+production_host=smartroom.goossen.dev
 while [ $# -gt 0 ]; do
   case $1 in
     --zip) zip=$2; shift ;;
@@ -43,6 +48,7 @@ while [ $# -gt 0 ]; do
     --firstboot-env) fbenv=$2; shift ;;
     --encrypt) encrypt=$2; shift ;;
     --full-readback) readback=1 ;;
+    --production) production=1 ;;
     --yes) yes=1 ;;
     *) die "unknown argument $1" ;;
   esac
@@ -57,6 +63,20 @@ else
   [ -n "$bootp" ] && [ -n "$rootp" ] || die "give --linux, or --boot and --root"
 fi
 [ -z "$fbenv" ] || [ -f "$fbenv" ] || die "no $fbenv"
+[ "$production" = 0 ] || [ -n "$fbenv" ] || die "--production needs --firstboot-env (it marks that file)"
+if [ -n "$fbenv" ]; then
+  [ "$(grep -c '^SMARTROOMOS_SERVER_URL=' "$fbenv")" = 1 ] || die "$fbenv needs exactly one SMARTROOMOS_SERVER_URL line"
+  grep -Eq '^SMARTROOMOS_SERVER_URL=https://[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9.])?(:[0-9]{1,5})?(/[^[:space:]]*)?$' "$fbenv" ||
+    die "$fbenv has no SMARTROOMOS_SERVER_URL=https://... (plain http is refused: anyone on the path could swap the Room Controller)"
+  ! grep -q '^SMARTROOMOS_PRODUCTION=' "$fbenv" || die "$fbenv sets SMARTROOMOS_PRODUCTION; say --production instead"
+  host=$(sed -n 's|^SMARTROOMOS_SERVER_URL=https://||p' "$fbenv" | sed 's|[:/].*||; s|\.$||' | tr '[:upper:]' '[:lower:]')
+  if [ "$host" = "$production_host" ] && [ "$production" = 0 ]; then
+    die "$fbenv names the production server ($production_host); say --production"
+  fi
+  if [ "$host" != "$production_host" ] && [ "$production" = 1 ]; then
+    die "--production needs the production server ($production_host), not $host"
+  fi
+fi
 case $encrypt in 0|1) ;; *) die "--encrypt is 0 or 1" ;; esac
 
 info() { diskutil info -plist "$1" | plutil -extract "$2" raw -o - - 2>/dev/null; }
@@ -198,6 +218,10 @@ printf 'format=1\nencrypt=%s\nlane=stable\n' "$encrypt" >"$vol/omarchy/install.c
 if [ -n "$fbenv" ]; then
   mkdir -p "$vol/asahi/extras"
   cp -X "$fbenv" "$vol/asahi/extras/firstboot.env"   # SmartRoom first boot reads it
+  if [ "$production" = 1 ]; then
+    [ -z "$(tail -c 1 "$vol/asahi/extras/firstboot.env")" ] || echo >>"$vol/asahi/extras/firstboot.env"
+    echo 'SMARTROOMOS_PRODUCTION=1' >>"$vol/asahi/extras/firstboot.env"
+  fi
 fi
 rm -rf "$tmp"
 find "$vol" -name '._*' -delete 2>/dev/null || true

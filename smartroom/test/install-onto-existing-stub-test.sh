@@ -91,6 +91,22 @@ grep -q "not a Linux partition" "$t/out" || fail "wrong refusal: $(cat "$t/out")
 "$t/install" "${args[@]/$sha/0000}" --linux disk0s5 >"$t/out" 2>&1 && fail "a wrong payload digest was accepted"
 echo "ok - refuses the recovery container, a foreign ESP and a wrong digest"
 
+# server trust: https only; the production server only with --production
+echo "SMARTROOMOS_SERVER_URL=http://example.invalid" >"$t/http.env"
+"$t/install" "${args[@]}" --linux disk0s5 --firstboot-env "$t/http.env" >"$t/out" 2>&1 && fail "an http server URL was accepted"
+grep -q "plain http is refused" "$t/out" || fail "wrong refusal: $(cat "$t/out")"
+echo "SMARTROOMOS_SERVER_URL=https://smartroom.goossen.dev." >"$t/prod.env"
+"$t/install" "${args[@]}" --linux disk0s5 --firstboot-env "$t/prod.env" >"$t/out" 2>&1 && fail "production without --production was accepted"
+grep -q "say --production" "$t/out" || fail "wrong refusal: $(cat "$t/out")"
+"$t/install" "${args[@]}" --linux disk0s5 --firstboot-env "$t/fb.env" --production >"$t/out" 2>&1 && fail "--production with a dev server was accepted"
+grep -q "production needs the production server" "$t/out" || fail "wrong refusal: $(cat "$t/out")"
+"$t/install" "${args[@]}" --linux disk0s5 --production >"$t/out" 2>&1 && fail "--production without --firstboot-env was accepted"
+grep -q "production needs --firstboot-env" "$t/out" || fail "wrong refusal: $(cat "$t/out")"
+{ cat "$t/prod.env"; echo SMARTROOMOS_PRODUCTION=1; } >"$t/prod-marked.env"
+"$t/install" "${args[@]}" --linux disk0s5 --firstboot-env "$t/prod-marked.env" --production >"$t/out" 2>&1 && fail "a file that sets SMARTROOMOS_PRODUCTION was accepted"
+grep -q "say --production instead" "$t/out" || fail "wrong refusal: $(cat "$t/out")"
+echo "ok - server trust: https only; production only with --production"
+
 # dry run changes nothing
 before=$(cat "$state"/disk0s*)
 "$t/install" "${args[@]}" --linux disk0s5 >"$t/out" 2>&1 || fail "dry run failed: $(cat "$t/out")"
@@ -114,3 +130,10 @@ echo "ok - splits the Linux partition into Boot and Root by offset, writes and r
 grep -qx encrypt=1 "$t/vol/disk0s4/omarchy/install.conf" || fail "encrypt=1 not written"
 "$t/install" "${args[@]}" --boot disk0s5 --root disk0s6 >"$t/out" 2>&1 && fail "the recovery container accepted as --root"
 echo "ok - rewrites an installed Boot and Root, never the recovery container"
+
+printf 'SMARTROOMOS_SERVER_URL=https://smartroom.goossen.dev' >"$t/prod-nonl.env"
+"$t/install" "${args[@]}" --boot disk0s5 --root disk0s7 --firstboot-env "$t/prod-nonl.env" --production --yes >"$t/out" 2>&1 ||
+  fail "production install failed: $(cat "$t/out")"
+[[ $(cat "$t/vol/disk0s4/asahi/extras/firstboot.env") == $'SMARTROOMOS_SERVER_URL=https://smartroom.goossen.dev\nSMARTROOMOS_PRODUCTION=1' ]] ||
+  fail "--production must add SMARTROOMOS_PRODUCTION=1 on its own line: $(cat "$t/vol/disk0s4/asahi/extras/firstboot.env")"
+echo "ok - --production marks the ESP copy"

@@ -85,6 +85,17 @@ owned by a non-root user or a user group (gid >= 1000) that
 `visudo -c` in the image. It also fails if the image's Recovery app
 (`esp/aurora/recovery`) is not the SmartRoom build or still shows Omarchy
 (`smartroom/recovery-branding app`).
+On a SmartRoom image it runs `smartroom/room-lockdown-check` (no local
+shell or root from a classroom keyboard: locked passwords, the room user out
+of `wheel`, a sudoers file with only the Room Controller's commands and
+`sudo -l` agreeing, no terminal package, no key binds, VT switching off,
+the power, reboot, suspend and hibernate keys ignored by logind and
+Ctrl+Alt+Del masked, the kiosk config at `/usr/share/smartroomos/hypr` and
+not copied into a home). `room/packages` no longer installs `foot`.
+`mac/engine-install` and `mac/install-onto-existing-stub` take only an
+https server URL, and the production server only with `--production`, which
+adds `SMARTROOMOS_PRODUCTION=1` to the `firstboot.env` they put on the ESP
+(the firmware's first boot refuses production without it).
 
 The Recovery app is the one input built on a Mac (Swift/AppKit):
 `smartroom/mac/build-recovery-app --screens OUT` builds it from this checkout,
