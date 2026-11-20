@@ -134,14 +134,20 @@ sys.exit(open(sys.argv[2], "rb").read() not in open(sys.argv[1], "rb").read())' 
   else
     failed "Mesa opens the kernel's GPU driver: $out"
   fi
-  hypr=$m/etc/skel/.config/hypr
-  check "cursor invisible in hyprland.conf (etc/skel)" awk '
+  hypr=$m/usr/share/smartroomos/hypr
+  check "cursor invisible in hyprland.conf (usr/share/smartroomos/hypr)" awk '
     /^[[:space:]]*cursor[[:space:]]*\{/ { s = 1; next }
     s && /^[[:space:]]*\}/ { s = 0 }
     s && /^[[:space:]]*invisible[[:space:]]*=[[:space:]]*true[[:space:]]*$/ { found = 1 }
     END { exit !found }' "$hypr/hyprland.conf"
-  check "cursor invisible in hyprland.lua (etc/skel)" \
+  check "cursor invisible in hyprland.lua (usr/share/smartroomos/hypr)" \
     grep -Eq '^[[:space:]]*cursor[[:space:]]*=[[:space:]]*\{[^}]*invisible[[:space:]]*=[[:space:]]*true' "$hypr/hyprland.lua"
+  # No local shell or root from a classroom keyboard; see the script's header.
+  lockdown=$(bash "$(dirname -- "${BASH_SOURCE[0]}")/room-lockdown-check" "$m" 2>&1)
+  lockdown_rc=$?
+  grep -v -e '^ROOM LOCKDOWN ' <<<"$lockdown"
+  fails=$((fails + $(grep -c '^FAIL ' <<<"$lockdown")))
+  (( lockdown_rc == 0 )) || grep -q '^FAIL ' <<<"$lockdown" || failed "room-lockdown-check did not run: $lockdown"
   browser=$(awk '$1 ~ /chromium/ { print $1; exit }' "$(dirname -- "${BASH_SOURCE[0]}")/room/packages")
   echo "browser packages: $(cd "$m/var/lib/pacman/local" && ls -d *chromium* 2>/dev/null | paste -sd' ' -)"
   check "room browser $browser installed (room/packages)" test -n "$(ls -d "$m/var/lib/pacman/local/$browser"-[0-9]* 2>/dev/null)"

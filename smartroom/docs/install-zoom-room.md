@@ -127,6 +127,12 @@ SMARTROOMOS_AGENT_INSTALL_SHA256=<curl -fsS https://<server>/api/agent/install.s
 SMARTROOMOS_UNIQUE_ID=<optional pre-minted uuid>
 ```
 
+The server URL must be https. For the production server
+(`smartroom.goossen.dev`) add `--production` to the `engine-install`
+arguments below; it writes `SMARTROOMOS_PRODUCTION=1` into the ESP copy, and
+first boot refuses production without it. Do not put that line in the file
+yourself; `engine-install` refuses it.
+
 On the Mac, get Omarchy's signed restore-image helper (the engine requires
 it, even where it never runs it), from the app's DMG
 ([engine-headless.md, The restore-image helper](engine-headless.md#the-restore-image-helper)):
