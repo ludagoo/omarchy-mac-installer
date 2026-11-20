@@ -9,6 +9,50 @@ and the boot chain (m1n1-aurora, uboot-aurora, Limine, linux-aurora, the
 initramfs, vendor firmware, snapshots). The top layer is only ours: Hyprland,
 Omarchy's Chromium, the room package list and the room's own files.
 
+## Releases and signatures (PROGRAM decision 4)
+
+A SmartRoom build is a **release** unless it is built with `--dev`
+(PROGRAM decision 4). `smartroom/build-image --release-version V
+--release-base URL` (defaults `YYYY.MM.DD-studio-<channel>` and
+`https://smartroom.goossen.dev/releases`) records every installed package
+(name, version, file, sha256) and writes `OUT/release/V`: those archives,
+each with its publisher's signature (Arch Linux ARM, Asahi ALARM, Omarchy,
+or the SmartRoom key for our own), a `[smartroom-release]` database,
+`PACKAGES` and `RELEASE`. The database, `PACKAGES` and `RELEASE` are signed
+on the build host by `release_signer` in `build-mac-image`: the container
+asks through `OUT/release/V/.sign-request`, and the secret key never enters
+it. The image's `/etc/pacman.conf` names only `[smartroom-release]`
+(`SigLevel = Required DatabaseRequired`), through
+`/etc/pacman.d/smartroom-release` (`# release=V`, `Server = URL/V`), the
+mirror file the firmware's `smartroomos-release switch` rewrites, so a room
+changes packages only by switching to the next release. The image keeps the
+signed release database, `/usr/share/smartroomos/release/{PACKAGES,RELEASE}`
+(+ `.sig`) and the SmartRoom public keyring in `/usr/share/pacman/keyrings`.
+First boot populates it (ludagoo/omarchy-mac-pkgs `omarchy-mac-first-boot`
+adds `smartroom` when `smartroom.gpg` ships). `smartroom/release-check`
+checks `OUT/release/V` before it is published. `desk-check` runs
+`smartroom/release-image-check`, which also checks that the installed
+packages are `PACKAGES` exactly. A `--dev` image keeps the channel's
+repositories. Every SmartRoom image's `pacman.conf` requires a trusted
+signature on every package, local files included
+(`release_repo.py require-signatures`); databases stay `DatabaseOptional`
+on a dev image, because Arch and Omarchy sign none, and the build pins them
+by sha256. The build's own Asahi keyring bootstrap no longer installs with
+`LocalFileSigLevel = Never`: it trusts the key from the sha256-pinned
+archive by fingerprint and pacman checks the archive's own signature.
+`smartroom/test/release-test.sh`, `signatures-test.sh` and
+`image-builder/test/test_release_repo.py` cover it.
+
+CI: `.github/workflows/smartroom-ci.yml` runs `image-builder/test/all` and
+`smartroom/test/all` (with ludagoo/omarchy-mac-pkgs at `PKGS_REF` beside
+it) on pushes to `smartroom/main`, `smartroom/edge` and `fix/**`, read-only
+and without secrets. Actions are disabled on this fork, so it does not run
+until Lucas enables them. To enable: turn Actions on, then at once disable
+every inherited workflow (`gh workflow disable` each one except
+`SmartRoom checks`), because their files on `main` (`mac-image`,
+`mac-upload`, `mac-catalog-sign`, `mac-promote`, `mac-app-release` …) would
+otherwise run on upstream's triggers.
+
 ## Base
 
 | | |
@@ -130,7 +174,8 @@ every SmartRoom hunk behind `profile == smartroom`.
 
 GitHub Actions are disabled on this fork: none of the inherited workflows
 (`mac-image`, `mac-upload`, `mac-catalog-sign`, `mac-promote`, `mac-app-release`
-and the rest) can build, sign, notarize or publish anything from here.
+and the rest) can build, sign, notarize or publish anything from here. The
+fork's own `smartroom-ci.yml` waits for the enable procedure above.
 
 ## Rules
 

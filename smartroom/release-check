@@ -1,0 +1,37 @@
+#!/bin/bash
+# Check a SmartRoom release directory before it is published:
+#   smartroom/release-check DIR FINGERPRINT KEY.ASC
+# DIR (OUT/release/VERSION of smartroom/build-image) must hold the database,
+# PACKAGES and RELEASE with good signatures by FINGERPRINT (KEY.ASC its public
+# key), every archive PACKAGES names with its sha256 and a signature, and a
+# database that lists exactly PACKAGES.
+set -euo pipefail
+here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+dir=${1:?Usage: smartroom/release-check DIR FINGERPRINT KEY.ASC}
+key=${2:?Usage: smartroom/release-check DIR FINGERPRINT KEY.ASC}
+asc=${3:?Usage: smartroom/release-check DIR FINGERPRINT KEY.ASC}
+fail() { echo "release-check: $*" >&2; exit 1; }
+
+check=$(mktemp -d)
+trap 'rm -rf "$check"' EXIT
+gpg --homedir "$check" --batch --quiet --import "$asc" 2>/dev/null || fail "$asc is no public key"
+for name in smartroom-release.db PACKAGES RELEASE; do
+  [[ -f $dir/$name && -f $dir/$name.sig ]] || fail "$dir/$name or its signature is missing"
+  gpg --homedir "$check" --batch --status-fd 1 --verify "$dir/$name.sig" "$dir/$name" 2>/dev/null |
+    awk -v key="$key" '$2 == "VALIDSIG" && ($3 == key || $NF == key) { ok = 1 } END { exit !ok }' ||
+    fail "$name is not signed by $key"
+done
+while IFS='|' read -r name version _ file sha; do
+  [[ -f $dir/$file && -s $dir/$file.sig ]] || fail "$name $version: $file or its signature is missing"
+  [[ $(sha256sum "$dir/$file" | cut -d' ' -f1) == "$sha" ]] || fail "$name $version: $file is not the recorded archive"
+done <"$dir/PACKAGES"
+python3 "$here/../image-builder/builder/release_repo.py" check-db --records "$dir/PACKAGES" "$dir/smartroom-release.db" ||
+  fail "the database is not PACKAGES"
+grep -q '^release=' "$dir/RELEASE" && grep -q '^package_set_sha256=[0-9a-f]\{64\}$' "$dir/RELEASE" ||
+  fail "RELEASE names no release or package set"
+[[ $(sed -n 's/^repository_sha256=//p' "$dir/RELEASE") == "$(sha256sum "$dir/smartroom-release.db" | cut -d' ' -f1)" ]] ||
+  fail "RELEASE names another database"
+extra=$(cd "$dir" && find . -maxdepth 1 -type f ! -name '*.sig' ! -name smartroom-release.db ! -name PACKAGES ! -name RELEASE -printf '%f\n' |
+  LC_ALL=C sort | comm -23 - <(cut -d'|' -f4 "$dir/PACKAGES" | LC_ALL=C sort))
+[[ -z $extra ]] || fail "files PACKAGES does not name: $(paste -sd' ' <<<"$extra")"
+echo "release $(sed -n 's/^release=//p' "$dir/RELEASE"): $(wc -l <"$dir/PACKAGES") packages, signed by $key"
