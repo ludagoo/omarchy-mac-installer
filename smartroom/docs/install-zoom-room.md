@@ -92,6 +92,14 @@ two-device root boots normally).
 
 ## 3. Install
 
+> **Do not install `smartroom-3`.** It does not meet the requirements: its Mesa
+> does not open the kernel's GPU driver on the 7.3 kernel, and nothing checks
+> that a room comes back after a power cut. Install `smartroom-edge-2026.11.20`
+> (or later) from the `smartroom/edge` branch; its runbook, in that branch's
+> copy of this file, says which image to use. `REL` below is left as the
+> stable line's folder only so these steps keep making sense; do not run them
+> against `smartroom-3`.
+
 From the Mini, copy the tools and the release to the Mac (`MAC` is the Mac's
 address, `ADMIN` the owner account):
 
