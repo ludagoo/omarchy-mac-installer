@@ -43,3 +43,14 @@ etc/pacman.d/*
 !etc/sysctl.d/10-smartroomos-panic.conf
 !etc/systemd/system.conf.d/smartroomos-watchdog.conf
 !etc/mkinitcpio.conf.d/zz-smartroomos-safety.conf
+# Updates and rollback on a Studio are smartroom-release (a watchdog-guarded aura-try
+# trial of a whole release). The Mini's snapshot, boot-try, boot-commit and update
+# tools and the agent's pin to them are not on this image; setup-run pins the Room
+# Controller to smartroom-release instead.
+usr/local/sbin/smartroomos-snapshot
+usr/local/bin/smartroomos-snapshot
+usr/local/lib/smartroomos/snapshot-lib.sh
+usr/local/sbin/smartroomos-boot-try
+usr/local/sbin/smartroomos-boot-commit
+usr/local/sbin/smartroomos-update
+etc/systemd/system/smartroom-agent.service.d/snapshot-helper.conf

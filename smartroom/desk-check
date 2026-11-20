@@ -219,6 +219,16 @@ sys.exit(open(sys.argv[2], "rb").read() not in open(sys.argv[1], "rb").read())' 
   check "omarchy-mac-first-boot enabled" test -L "$wants/omarchy-mac-first-boot.service"
   check "timezone America/Chicago" test "$(readlink "$m/etc/localtime" | sed 's|^\.\./|/|')" = /usr/share/zoneinfo/America/Chicago
   check "snapshots left to Omarchy" test -e "$m/etc/smartroomos/omarchy-base"
+  # Updates and rollback: smartroom-release (aura-try), not the Mini's snapshot tools.
+  check "smartroom-release installed" test -x "$m/usr/bin/smartroom-release"
+  check "smartroom-release health service enabled at sysinit" test -L "$m/usr/lib/systemd/system/sysinit.target.wants/smartroom-release-health.service" -o -L "$m/etc/systemd/system/sysinit.target.wants/smartroom-release-health.service"
+  check "smartroom-release trusts the release key" test -s "$m/usr/share/smartroomos/release-keyring.gpg"
+  check "smartroom-release carries the room's identity" grep -qx '/var/lib/smartroomos' "$m/usr/share/smartroomos/release-carry.list"
+  check "Room Controller helper is smartroom-release" grep -qx 'Environment=SMARTROOM_SNAPSHOT_HELPER=/usr/bin/smartroom-release' "$m/etc/systemd/system/smartroom-agent.service.d/snapshot-helper.conf"
+  for f in usr/local/sbin/smartroomos-snapshot usr/local/bin/smartroomos-snapshot usr/local/sbin/smartroomos-boot-try \
+           usr/local/sbin/smartroomos-boot-commit usr/local/sbin/smartroomos-update usr/local/lib/smartroomos/snapshot-lib.sh; do
+    check "Mini snapshot/update tool absent: $f" bash -c '[[ ! -e $1 && ! -L $1 ]]' _ "$m/$f"
+  done
   check "no owner provisioning armed" test ! -e "$m/var/lib/omarchy/provisioning/pending"
   check "/etc/hosts world-readable (systemd-resolved runs as its own user)" test "$(stat -c %a "$m/etc/hosts")" = 644
   # Adoption rewrites /etc/hosts with the image's own script; run it on a scratch /etc.

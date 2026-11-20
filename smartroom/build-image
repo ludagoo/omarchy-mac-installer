@@ -55,6 +55,8 @@ if ! $dev; then
   printf 'version=%s\nurl=%s/%s\n' "$release_version" "$release_base" "$release_version" >"$dir/release"
   python3 "$here/../image-builder/builder/release_repo.py" check-release "$dir/release" >/dev/null || exit 64
 fi
+# Releases are signed with the SmartRoom package key; the image trusts it for smartroom-release.
+cp "$packages/key.asc" "$dir/setup/release-key.asc"
 git clone -q "$firmware_repo" "$dir/fw"
 git -C "$dir/fw" checkout -q "$firmware"
 firmware=$(git -C "$dir/fw" rev-parse HEAD)

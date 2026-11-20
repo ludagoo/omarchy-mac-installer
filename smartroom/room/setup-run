@@ -6,6 +6,7 @@
 #                     firmware/COMMIT (branch omarchy-base)
 #   authorized_keys   the admin public keys (never a secret; not committed)
 #   overlay-exclude   overlay files the Omarchy base owns (never installed)
+#   release-key.asc   the public key smartroom-release trusts (the package key)
 #   build-info        lines for /usr/share/smartroomos/build-info
 # It installs our overlay minus overlay-exclude, our first boot, the DHCP
 # client id, then runs our studio setup unchanged in image mode (user, keys,
@@ -52,7 +53,22 @@ done < <(cd "$fw/overlay" && find . -mindepth 1 \( -type f -o -type l \) -print0
 # The flag our first boot and first-connect read: snapshots are Omarchy's.
 install -d -m 0755 /etc/smartroomos
 : >/etc/smartroomos/omarchy-base
+# The Room Controller's update and rollback helper is smartroom-release (the Mini's
+# snapshot tool is in overlay-exclude). Written before the studio setup, whose
+# product contract requires this pin on an Omarchy-base image.
+install -d -m 0755 /etc/systemd/system/smartroom-agent.service.d
+printf '[Service]\nEnvironment=SMARTROOM_SNAPSHOT_HELPER=/usr/bin/smartroom-release\n' \
+  >/etc/systemd/system/smartroom-agent.service.d/snapshot-helper.conf
 install -D -m 0755 "$fw/studio-install/firstboot.sh" /usr/local/sbin/smartroomos-firstboot
+# smartroom-release checks a release's manifest against this key (the SmartRoom
+# package key, public). Without it a room can only stage an unsigned release.
+if [[ -f $here/release-key.asc ]]; then
+  gnupghome=$(mktemp -d)
+  install -d -m 0755 /usr/share/smartroomos
+  gpg --homedir "$gnupghome" --dearmor <"$here/release-key.asc" >/usr/share/smartroomos/release-keyring.gpg
+  chmod 0644 /usr/share/smartroomos/release-keyring.gpg
+  rm -rf "$gnupghome"
+fi
 # Omarchy's first boot (keyring, deferred hardware setup, the boot rebuild)
 # finishes before ours starts: both make the pacman keyring, and ours ends in
 # a reboot.
