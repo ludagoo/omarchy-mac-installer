@@ -27,7 +27,9 @@ for p in etc/sysctl.d/10-smartroomos-panic.conf etc/systemd/system.conf.d/smartr
          usr/lib/initcpio/hooks/smartroomos-safety usr/local/sbin/smartroomos-integrity \
          usr/local/sbin/smartroom-rollback usr/lib/systemd/system/smartroomos-integrity.service \
          usr/lib/systemd/system/smartroomos-integrity-periodic.timer \
-         usr/lib/systemd/system/smartroom-rollback-mark-good.service etc/smartroomos/integrity.conf; do
+         usr/lib/systemd/system/smartroom-rollback-mark-good.service \
+         usr/lib/systemd/system/smartroom-rollback-mark-good.timer \
+         etc/systemd/system/timers.target.wants/smartroom-rollback-mark-good.timer etc/smartroomos/integrity.conf; do
   [[ $(check "$room" "$p") == kept ]] || fail "the Studio must get $p"
 done
 for p in boot/limine.conf etc/default/limine etc/mkinitcpio.conf etc/mkinitcpio.conf.d/90-omarchy.conf \
