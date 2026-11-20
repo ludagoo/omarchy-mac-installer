@@ -47,8 +47,12 @@ EOF
 Cmnd_Alias SR_SNAPSHOT = \
     /usr/local/bin/smartroomos-snapshot ^(status|list) --json$, \
     /usr/local/bin/smartroomos-snapshot ^(protect|unprotect|delete) [0-9]+ --json$
+Cmnd_Alias SR_ROLLBACK = /usr/local/bin/smartroom-rollback ^status --json$
+Cmnd_Alias SR_RELEASE = \
+    /usr/bin/smartroom-release ^(status|list) --json$, \
+    /usr/bin/smartroom-release ^restore [0-9]+ --no-reboot --json$
 Cmnd_Alias SR_REBOOT = /usr/bin/systemctl reboot
-smartroomcontroller ALL=(root) NOPASSWD: SR_SNAPSHOT, SR_REBOOT
+smartroomcontroller ALL=(root) NOPASSWD: SR_SNAPSHOT, SR_ROLLBACK, SR_RELEASE, SR_REBOOT
 EOF
   printf '[Login]\n#HandlePowerKey=poweroff\n' >"$r/usr/lib/systemd/logind.conf"
   printf '[Login]\nHandlePowerKey=poweroff\n' >"$r/usr/lib/systemd/logind.conf.d/10-vendor.conf"
@@ -90,9 +94,9 @@ must_fail "alarm unlocked" "alarm password locked" \
 must_fail "in wheel" "not in wheel" \
   sed -i 's/^wheel:x:998:alarm$/wheel:x:998:alarm,smartroomcontroller/' "$r/etc/group"
 must_fail "NOPASSWD: ALL" "grants no ALL command" \
-  sed -i 's/NOPASSWD: SR_SNAPSHOT, SR_REBOOT/NOPASSWD: ALL/' "$r/etc/sudoers.d/smartroomcontroller"
+  sed -i 's/NOPASSWD: SR_SNAPSHOT, SR_ROLLBACK, SR_RELEASE, SR_REBOOT/NOPASSWD: ALL/' "$r/etc/sudoers.d/smartroomcontroller"
 must_fail "ALL after a list" "grants no ALL command" \
-  sed -i 's/NOPASSWD: SR_SNAPSHOT, SR_REBOOT/NOPASSWD: SR_SNAPSHOT, ALL/' "$r/etc/sudoers.d/smartroomcontroller"
+  sed -i 's/NOPASSWD: SR_SNAPSHOT, SR_ROLLBACK, SR_RELEASE, SR_REBOOT/NOPASSWD: SR_SNAPSHOT, ALL/' "$r/etc/sudoers.d/smartroomcontroller"
 must_fail "(ALL) ALL on a continued line" "grants no ALL command" \
   bash -c 'printf "smartroomcontroller ALL=\\\\\n  (ALL) ALL\n" >>"$1"' _ "$r/etc/sudoers.d/smartroomcontroller"
 must_fail "a shell in sudoers" "no shell" \

@@ -60,13 +60,21 @@ check "sudoers.d/$user grants no ALL command" bash -c "$(declare -f rules); ! ru
 check "sudoers.d/$user grants no shell, editor, interpreter or pacman" bash -c "$(declare -f rules); ! rules \"\$1\" | grep -Eq '$shells'" _ "$sudoers"
 check "sudoers.d/$user grants systemctl reboot" bash -c "$(declare -f rules); rules \"\$1\" | grep -q '/usr/bin/systemctl reboot'" _ "$sudoers"
 check "sudoers.d/$user pins the snapshot helper's arguments (regex)" \
-  bash -c "$(declare -f rules); rules \"\$1\" | grep -q '/usr/local/bin/smartroomos-snapshot ^'" _ "$sudoers"
+  bash -c "$(declare -f rules); rules \"\$1\" | grep -qF '/usr/local/bin/smartroomos-snapshot ^'" _ "$sudoers"
+check "sudoers.d/$user pins smartroom-rollback status --json (regex)" \
+  bash -c "$(declare -f rules); rules \"\$1\" | grep -qF '/usr/local/bin/smartroom-rollback ^status --json$'" _ "$sudoers"
+check "sudoers.d/$user pins smartroom-release status/list/restore (regex)" \
+  bash -c "$(declare -f rules); rules \"\$1\" | grep -qF '/usr/bin/smartroom-release ^'" _ "$sudoers"
 if (( EUID == 0 )) && [[ -x $r/usr/bin/sudo && -e $r/proc/self ]]; then
   list=$(chroot "$r" sudo -n -l -U "$user" 2>&1)
   echo "sudo -l -U $user:"
   sed 's/^/  /' <<<"$list" | head -n 30
   check "sudo -l -U $user: no ALL command" bash -c '! grep -Eq "$1" <<<"$2"' _ "$broad" "$list"
   check "sudo -l -U $user: systemctl reboot" grep -q '/usr/bin/systemctl reboot' <<<"$list"
+  check "sudo -l -U $user: smartroom-rollback status --json" grep -qF '/usr/local/bin/smartroom-rollback ^status --json$' <<<"$list"
+  if [[ -x $r/usr/bin/smartroom-release ]]; then
+    check "sudo -l -U $user: smartroom-release" grep -qF '/usr/bin/smartroom-release ^' <<<"$list"
+  fi
 else
   echo "SKIP sudo -l -U $user (needs root and a mounted image)"
 fi
