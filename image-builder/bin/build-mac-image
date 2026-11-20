@@ -1347,17 +1347,54 @@ apply_smartroom() {
 ENABLE_VERIFICATION=no
 EOF
   chmod 0644 "$target/etc/limine-entry-tool.d/zz-smartroom-firmware.conf"
-  # Reboot 10s after a kernel panic. The UKI line is derived from this file;
+  # The words that turn a kernel failure into a reboot, and make systemd arm
+  # the watchdog in the initramfs too (SmartRoom Firmware docs/boot-integrity-rollback.md,
+  # smartroomos_boot_safety_cmdline). The UKI line is derived from this file;
   # grub-console.sh rewrites GRUB_CMDLINE_LINUX and leaves this line alone.
   local grub=$target/etc/default/grub
-  [[ -f $grub ]] || fail "the image has no /etc/default/grub to carry panic=10"
-  if ! grep -Eq '^GRUB_CMDLINE_LINUX_DEFAULT="(.*[[:space:]])?panic=10([[:space:]].*)?"$' "$grub"; then
-    grep -q '^GRUB_CMDLINE_LINUX_DEFAULT="' "$grub" ||
-      fail "GRUB_CMDLINE_LINUX_DEFAULT is missing; panic=10 has nowhere to go"
-    sed -i 's/^GRUB_CMDLINE_LINUX_DEFAULT="\(.*\)"/GRUB_CMDLINE_LINUX_DEFAULT="\1 panic=10"/' "$grub"
+  [[ -f $grub ]] || fail "the image has no /etc/default/grub to carry the boot safety words"
+  grep -q '^GRUB_CMDLINE_LINUX_DEFAULT="' "$grub" ||
+    fail "GRUB_CMDLINE_LINUX_DEFAULT is missing; the boot safety words have nowhere to go"
+  add_safety_words "$grub"
+}
+
+# $1 /etc/default/grub: every safety word in GRUB_CMDLINE_LINUX_DEFAULT, once.
+add_safety_words() {
+  local word
+  for word in $SMARTROOM_SAFETY_CMDLINE; do
+    grub_default_has_word "$1" "$word" ||
+      sed -i "s/^GRUB_CMDLINE_LINUX_DEFAULT=\"\(.*\)\"/GRUB_CMDLINE_LINUX_DEFAULT=\"\1 $word\"/" "$1"
+    grub_default_has_word "$1" "$word" || fail "$word did not reach the kernel command line"
+  done
+}
+
+# Same list as smartroomos_boot_safety_cmdline in the firmware's install-lib.sh
+# (smartroom/test/zero-touch-boot-test.sh compares the two when a firmware
+# checkout is at hand).
+SMARTROOM_SAFETY_CMDLINE='panic=10 oops=panic softlockup_panic=1 systemd.watchdog_sec=30'
+
+# $1 /etc/default/grub  $2 one word. True when GRUB_CMDLINE_LINUX_DEFAULT has it.
+grub_default_has_word() {
+  awk -v w="$2" -F'"' '/^GRUB_CMDLINE_LINUX_DEFAULT="/ { n = split($2, a, " "); for (i = 1; i <= n; i++) if (a[i] == w) found = 1 } END { exit !found }' "$1"
+}
+
+# A room never waits at boot: no Limine menu timeout, so a key held at power-on
+# cannot hold a menu. Omarchy's template says timeout: 1 (and limine-menu-defaults
+# gives a menu with 3 that value). The SmartRoom Firmware integrity check puts
+# timeout: 0 back on the ESP if anything changes it.
+force_zero_wait() {
+  [[ $profile == smartroom ]] || return 0
+  local conf=$target/boot/efi/limine.conf
+  [[ -s $conf ]] || fail "the image has no Limine menu to set timeout: 0 in"
+  if grep -Eq '^timeout:' "$conf"; then
+    sed -i 's/^timeout:.*/timeout: 0/' "$conf"
+  else
+    sed -i '1i timeout: 0' "$conf"
   fi
-  grep -Eq '^GRUB_CMDLINE_LINUX_DEFAULT="(.*[[:space:]])?panic=10([[:space:]].*)?"$' "$grub" ||
-    fail "panic=10 did not reach the kernel command line"
+  [[ $(grep -c '^timeout:' "$conf") == 1 ]] && grep -qx 'timeout: 0' "$conf" ||
+    fail "limine.conf does not say timeout: 0"
+  ! grep -Eq '^[[:space:]]*[a-z_]*path:.*#[0-9a-fA-F]{32,}' "$conf" ||
+    fail "limine.conf carries a file checksum (Limine would wait for a key)"
 }
 
 sealed_body() {
@@ -1630,6 +1667,7 @@ SCRIPT
     fail "the image has no $KERNEL UKI for Limine (logs/limine-boot.log)"
   cmp -s "$target/usr/share/limine/BOOTAA64.EFI" "$target/boot/efi/EFI/BOOT/BOOTAA64.EFI" ||
     fail "the U-Boot slot does not carry Limine (logs/limine-boot.log)"
+  force_zero_wait
   verify_uki_cmdline
   # limine-entry-tool gives an empty /etc/machine-id a value and keys its
   # history directory on the ESP by it. The image ships neither: the Mac

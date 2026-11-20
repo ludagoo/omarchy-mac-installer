@@ -89,6 +89,20 @@ if [[ -e $m/etc/omarchy-mac-boot/headless ]]; then
     grep -Eq '^GRUB_CMDLINE_LINUX_DEFAULT="(.*[[:space:]])?panic=10([[:space:]].*)?"$' "$m/etc/default/grub"
   check "panic=10 is on the Limine command line the UKI boots" \
     bash -c 'printf "%s\n" "$1" | grep -Eq "(^|[[:space:]])panic=10([[:space:]]|$)"' _ "$cmdline"
+  # Never wait at boot, reboot on every failure (SmartRoom Firmware WS1).
+  check "Limine menu timeout: 0 (no menu a held key could keep open)" \
+    test "$(sed -n 's/^timeout: //p' "$m/boot/efi/limine.conf")" = 0
+  for word in oops=panic softlockup_panic=1 systemd.watchdog_sec=30; do
+    check "$word is on the Limine command line the UKI boots" \
+      bash -c 'printf "%s\n" "$1" | grep -Fq -- " $2"' _ " $cmdline" "$word"
+  done
+  check "systemd watchdog drop-in (RuntimeWatchdogSec, CrashAction=reboot)" \
+    bash -c 'grep -q "^RuntimeWatchdogSec=" "$1" && grep -qx "CrashAction=reboot" "$1"' _ "$m/etc/systemd/system.conf.d/smartroomos-watchdog.conf"
+  check "panic/oops/hung-task sysctls" grep -q 'kernel.hung_task_panic' "$m/etc/sysctl.d/10-smartroomos-panic.conf"
+  check "initramfs safety hook installed and in the mkinitcpio hooks" \
+    bash -c 'test -f "$1/usr/lib/initcpio/install/smartroomos-safety" && test -f "$1/usr/lib/initcpio/hooks/smartroomos-safety" && grep -q smartroomos-safety "$1/etc/mkinitcpio.conf.d/zz-smartroomos-safety.conf"' _ "$m"
+  check "integrity check on boot, periodic timer and rollback command" \
+    bash -c 'test -L "$1/multi-user.target.wants/smartroomos-integrity.service" && test -L "$1/timers.target.wants/smartroomos-integrity-periodic.timer" && test -x "$2/usr/local/sbin/smartroom-rollback"' _ "$m/etc/systemd/system" "$m"
   meta=$(dirname -- "$zip")/installer_data.json
   if [[ -f $meta ]]; then
     check "picker and stub name: installer_data.json says SmartRoom Firmware" \
