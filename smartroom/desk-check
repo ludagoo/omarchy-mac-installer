@@ -9,12 +9,19 @@ set -uo pipefail
 zip=${1:?Usage: smartroom/desk-check ZIP WORKDIR}
 work=${2:?Usage: smartroom/desk-check ZIP WORKDIR}
 (( EUID == 0 )) || { echo "run as root" >&2; exit 1; }
-mkdir -p "$work/x" "$work/mnt"
+mkdir -p "$work/x" "$work/ro" "$work/mnt"
 m=$work/mnt
-cleanup() { umount -R "$m" 2>/dev/null; }
+ro=$work/ro
+bootchk=$work/bootchk
+cleanup() {
+  umount -R "$bootchk/m" 2>/dev/null || true
+  umount -R "$m" 2>/dev/null || true
+  umount "$ro" 2>/dev/null || true
+}
 trap cleanup EXIT
 [[ -f $work/x/root.img ]] || bsdtar -xf "$zip" -C "$work/x" root.img boot.img esp || exit 1
-mount -o ro,loop,subvol=@ "$work/x/root.img" "$m" || exit 1
+mount -o ro,loop,subvol=@ "$work/x/root.img" "$ro" || exit 1
+mount --bind "$ro" "$m" || exit 1
 mount -o ro,loop "$work/x/boot.img" "$m/boot" || exit 1
 mount --bind -o ro "$work/x/esp" "$m/boot/efi" || exit 1
 for d in proc sys dev run tmp; do
@@ -31,14 +38,46 @@ failed() { echo "FAIL $*"; fails=$((fails + 1)); }
 check() { local what=$1; shift; if "$@" >/dev/null 2>&1; then pass "$what"; else failed "$what"; fi; }
 kver=$(ls "$m/usr/lib/modules" | grep -- '-ARCH$' | head -n 1)
 echo "kernel $kver"
+bootchk_root=$m
+if [[ ! -d $m/etc/pacman.d/gnupg ]]; then
+  # Sealed WS2 release images drop /etc/pacman.d/gnupg (first boot builds it)
+  # while keeping /var/lib/pacman/sync/smartroom-release.db.sig with
+  # DatabaseRequired. Run the boot check against an ephemeral overlayfs root
+  # whose keyring is populated strictly from the image's own keyrings.
+  rm -rf "$bootchk"
+  mkdir -p "$bootchk/up" "$bootchk/work" "$bootchk/m"
+  mount -t overlay overlay -o "lowerdir=$ro,upperdir=$bootchk/up,workdir=$bootchk/work" "$bootchk/m" || exit 1
+  mount --bind -o ro "$m/boot" "$bootchk/m/boot" || exit 1
+  mount --bind -o ro "$m/boot/efi" "$bootchk/m/boot/efi" || exit 1
+  for d in proc sys dev run tmp; do
+    case $d in
+      proc) mount -t proc proc "$bootchk/m/proc" ;;
+      sys) mount -t sysfs sys "$bootchk/m/sys" ;;
+      dev) mount --rbind /dev "$bootchk/m/dev" ;;
+      *) mount -t tmpfs "$d" "$bootchk/m/$d" ;;
+    esac
+  done
+  keyrings=(archlinuxarm asahi-alarm)
+  [[ ! -f $bootchk/m/usr/share/pacman/keyrings/omarchy.gpg ]] || keyrings+=(omarchy)
+  [[ ! -f $bootchk/m/usr/share/pacman/keyrings/smartroom.gpg ]] || keyrings+=(smartroom)
+  chroot "$bootchk/m" pacman-key --init >/dev/null 2>&1 \
+    && chroot "$bootchk/m" pacman-key --populate "${keyrings[@]}" >/dev/null 2>&1 \
+    || failed "populate ephemeral pacman keyring from image keyrings"
+  chroot "$bootchk/m" gpgconf --homedir /etc/pacman.d/gnupg --kill all >/dev/null 2>&1 || true
+  bootchk_root=$bootchk/m
+fi
 for mode in "" --boot-chain; do
-  if out=$(chroot "$m" env -i PATH=/usr/bin:/usr/sbin OMARCHY_BOOT_CHECK_UNAME="$kver" \
+  if out=$(chroot "$bootchk_root" env -i PATH=/usr/bin:/usr/sbin OMARCHY_BOOT_CHECK_UNAME="$kver" \
       omarchy-apple-silicon-boot-check $mode linux-aurora 2>&1); then
     pass "omarchy-apple-silicon-boot-check ${mode:-(full)}: ${out##*$'\n'}"
   else
     failed "omarchy-apple-silicon-boot-check ${mode:-(full)}: $out"
   fi
 done
+if [[ $bootchk_root == "$bootchk/m" ]]; then
+  chroot "$bootchk/m" gpgconf --homedir /etc/pacman.d/gnupg --kill all >/dev/null 2>&1 || true
+  umount -R "$bootchk/m" 2>/dev/null || true
+fi
 wants=$m/etc/systemd/system/multi-user.target.wants
 check "NetworkManager enabled (wired DHCP at boot)" test -L "$wants/NetworkManager.service"
 check "NetworkManager-wait-online masked (nothing waits on the network)" test "$(readlink "$m/etc/systemd/system/NetworkManager-wait-online.service")" = /dev/null
