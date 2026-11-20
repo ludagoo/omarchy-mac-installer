@@ -51,7 +51,8 @@ while [ $# -gt 0 ]; do
   esac
   shift
 done
-[ "$(uname -s)" = Darwin ] && [ "$(uname -m)" = arm64 ] || die "this runs on an Apple Silicon Mac's macOS"
+arch=$(uname -m)
+[ "$(uname -s)" = Darwin ] && { [ "$arch" = arm64 ] || [ "$arch" = x86_64 ]; } || die "this runs on an Apple Silicon or Intel Mac's macOS"
 [ "$(id -u)" = 0 ] || die "run with sudo"
 case $owner in
   "") ;;
@@ -484,7 +485,236 @@ grow_macos() {
     stop_partway "macOS is ${P_SIZE[1]} bytes after growing, not $target"
 }
 
+# --- Intel T2 Mac mini (Macmini8,1) removal ----------------------------------
+APPLE_BOOT_GUID="7c436110-ab2a-4bbb-a880-fe41995c9f82"
+
+recognize_intel() {
+  local i c k kinds="" refuse=""
+  if [ $n -lt 2 ] || [ "${P_TYPE[0]}" != EFI ] || [ "${P_TYPE[1]}" != Apple_APFS ] ||
+     [ "${P_UUID[1]}" != "$mac_store_uuid" ]; then
+    i=0; while [ $i -lt $n ]; do describe $i; i=$((i + 1)); done
+    die "this disk is not Apple EFI, the running macOS[, SmartRoom EFI, Linux]; not touching it"
+  fi
+  c=$(container_on "${P_ID[1]}") && [ "${C_REF[c]}" = "$mac_ref" ] ||
+    die "the running macOS's container ($mac_ref) is not on ${P_ID[1]}"
+  isc_uuid=${P_UUID[0]} isc_off=${P_OFF[0]}
+  mac_uuid=${P_UUID[1]} mac_off=${P_OFF[1]} mac_size=${P_SIZE[1]} mac_id=${P_ID[1]}
+  target=$((disk_size - mac_off))
+  if [ $n -eq 2 ]; then
+    [ $((disk_size - mac_off - mac_size)) -ge $GiB ] ||
+      die "nothing to remove: no SmartRoom installation, and less than 1 GiB free after macOS"
+    kind=free m=0
+    return 0
+  fi
+  M_UUID=() M_KIND=() M_OFF=() M_SIZE=() M_ID=()
+  m=0 i=2
+  while [ $i -lt $n ]; do
+    k=$(classify $i)
+    M_UUID[m]=${P_UUID[i]} M_KIND[m]=$k M_OFF[m]=${P_OFF[i]} M_SIZE[m]=${P_SIZE[i]} M_ID[m]=${P_ID[i]}
+    kinds="$kinds $k"
+    m=$((m + 1)) i=$((i + 1))
+  done
+  case "$kinds " in
+    " esp "|" esp linux ") ;;
+    *) refuse="after macOS, the layout is not SmartRoom EFI [+ Linux]:$kinds" ;;
+  esac
+  [ -n "$refuse" ] || [ "${M_SIZE[0]}" -le $((5 * GiB / 2)) ] || refuse="the ESP (${M_ID[0]}) is larger than 2.5 GiB"
+  i=1
+  while [ -z "$refuse" ] && [ $i -lt $m ]; do
+    [ $((M_OFF[i] - M_OFF[i - 1] - M_SIZE[i - 1])) -lt $((16 * MiB)) ] ||
+      refuse="a gap of 16 MiB or more between ${M_ID[i - 1]} and ${M_ID[i]}"
+    i=$((i + 1))
+  done
+  if [ -n "$refuse" ]; then
+    i=0; while [ $i -lt $n ]; do describe $i; i=$((i + 1)); done
+    die "refusing: $refuse. Nothing was changed."
+  fi
+  esp_index=2 kind=install
+}
+
+evidence_intel() {
+  local esp=${P_ID[esp_index]} mp v has_efi=0 has_meta=0
+  query "$tmp/e.info" info -plist "$esp"
+  v=$(need "$tmp/e.info" DiskUUID)
+  [ "$(upper "$v")" = "${M_UUID[0]}" ] && [ "$(get "$tmp/e.info" Content)" = EFI ] || die "$esp changed while being read"
+  mp=$(get "$tmp/e.info" MountPoint || true)
+  if [ -z "$mp" ]; then
+    mp=$tmp/esp
+    mkdir -p "$mp"
+    diskutil mount readOnly nobrowse -mountPoint "$mp" "$esp" >/dev/null 2>&1 || die "could not mount $esp read-only"
+    mounted=$esp
+  fi
+  if [ -s "$mp/EFI/BOOT/BOOTX64.EFI" ] || [ -s "$mp/EFI/limine/limine_x64.efi" ]; then has_efi=1; fi
+  if [ -s "$mp/limine.conf" ] || [ -d "$mp/smartroomos" ] || [ -s "$mp/EFI/Linux/smartroomos_linux-t2.efi" ]; then has_meta=1; fi
+  if [ "$has_efi" -eq 0 ] || [ "$has_meta" -eq 0 ]; then
+    die "refusing: $esp has no SmartRoom/Limine bootloader evidence, so it is not SmartRoom's ESP. Nothing was changed."
+  fi
+  evidence_text="Limine $([ -s "$mp/EFI/BOOT/BOOTX64.EFI" ] && echo BOOTX64.EFI || echo limine_x64.efi), $([ -s "$mp/limine.conf" ] && echo limine.conf || echo smartroomos)"
+  if [ -n "$mounted" ]; then
+    diskutil unmount "$mounted" >/dev/null 2>&1 || die "could not unmount $mounted after reading it"
+    mounted=""
+    rmdir "$mp" 2>/dev/null || true
+  fi
+}
+
+startup_check_intel() {
+  local dev id store suuid parent nvd nvn esp_u
+  esp_u=${M_UUID[0]:-}
+  nvd=$(nvram "${APPLE_BOOT_GUID}:efi-boot-device" 2>/dev/null || true)
+  nvn=$(nvram "${APPLE_BOOT_GUID}:efi-boot-next" 2>/dev/null || true)
+  case $(upper "$nvn") in
+    *BOOTX64.EFI*|*LIMINE_X64.EFI*|*"$esp_u"*)
+      if [ -n "$esp_u" ]; then
+        startup=next startup_text="next start is set to SmartRoom Firmware (efi-boot-next)"
+        return 0
+      fi ;;
+  esac
+  startup=unknown startup_text="unknown"
+  dev=$(bless --getBoot 2>/dev/null | head -n 1) || dev=""
+  case $dev in
+    /dev/disk*)
+      id=${dev#/dev/}
+      diskutil info -plist "$id" >"$tmp/b.info" 2>/dev/null || true
+      if has "$tmp/b.info" APFSPhysicalStores.0 && ! has "$tmp/b.info" APFSPhysicalStores.1; then
+        store=$(get "$tmp/b.info" APFSPhysicalStores.0.APFSPhysicalStore || true)
+        diskutil info -plist "$store" >"$tmp/b.store" 2>/dev/null || true
+        suuid=$(upper "$(get "$tmp/b.store" DiskUUID || true)")
+        parent=$(get "$tmp/b.store" ParentWholeDisk || true)
+        if [ "$suuid" = "$mac_uuid" ] && [ "$parent" = "$disk" ]; then
+          startup=macos startup_text="the running macOS"
+          return 0
+        fi
+      fi
+      startup=other startup_text="\"$(get "$tmp/b.info" VolumeName || echo "$id")\" ($id)"
+      return 0 ;;
+  esac
+  case $(upper "$nvd") in
+    *CORESERVICES*BOOT.EFI*) startup=macos startup_text="the running macOS (efi-boot-device)" ;;
+    *BOOTX64.EFI*|*LIMINE_X64.EFI*) startup=other startup_text="SmartRoom Firmware" ;;
+  esac
+}
+
+set_macos_startup_intel() {
+  local sip_out sip_ok=0 out rc=0
+  sip_out=$(csrutil status 2>/dev/null || true)
+  case $sip_out in
+    *"System Integrity Protection status: disabled"*|*"NVRAM Protections: disabled"*) sip_ok=1 ;;
+  esac
+  [ "$sip_ok" -eq 1 ] || die "SIP protects NVRAM ($sip_out); boot Recovery -> csrutil disable before resetting startup disk. Nothing was deleted."
+  out=$(bless --mount / --setBoot 2>&1) || rc=$?
+  [ $rc -eq 0 ] || die "bless --mount / --setBoot failed (exit $rc): $out. Nothing was deleted."
+  nvram -d "${APPLE_BOOT_GUID}:efi-boot-next" >/dev/null 2>&1 || true
+  nvram -d "${APPLE_BOOT_GUID}:efi-boot-next-data" >/dev/null 2>&1 || true
+  note "blessed the running macOS as the startup disk"
+  startup_check_intel
+  [ "$startup" = macos ] || die "after bless the startup disk is still $startup_text. Nothing was deleted."
+}
+
+frame_unchanged_intel() {
+  [ "${P_UUID[0]}" = "$isc_uuid" ] && [ "${P_OFF[0]}" = "$isc_off" ] &&
+    [ "${P_UUID[1]}" = "$mac_uuid" ] && [ "${P_OFF[1]}" = "$mac_off" ] ||
+    die "Apple EFI or macOS partition changed; stopping. Done so far:${done_list:- nothing}. Left:${left_list:- nothing}"
+}
+
+remove_member_intel() {
+  local j=$1 i id
+  snapshot
+  frame_unchanged_intel
+  i=$(part_by_uuid "${M_UUID[j]}") || stop_partway "${M_KIND[j]} ${M_UUID[j]} is gone before its step"
+  id=${P_ID[i]}
+  [ "${P_OFF[i]}" = "${M_OFF[j]}" ] && [ "${P_SIZE[i]}" = "${M_SIZE[j]}" ] ||
+    stop_partway "$id (${M_UUID[j]}) moved or changed size since it was reviewed"
+  [ "${P_UUID[i]}" != "$isc_uuid" ] && [ "${P_UUID[i]}" != "$mac_uuid" ] ||
+    die "internal error: refusing to touch protected partition $id"
+  [ "$id" != "$mac_id" ] && [ "$i" -ge 2 ] || die "internal error: $id is not after macOS"
+  say "deleting the ${M_KIND[j]} partition $id (${M_UUID[j]})"
+  diskutil eraseVolume free none "$id" || stop_partway "diskutil eraseVolume free none $id failed"
+  snapshot
+  frame_unchanged_intel
+  ! part_by_uuid "${M_UUID[j]}" >/dev/null || stop_partway "${M_KIND[j]} $id is still there after its step"
+}
+
+grow_macos_intel() {
+  local limit gpt_pad=$((32 * MiB))
+  snapshot
+  frame_unchanged_intel
+  [ $n -eq 2 ] || stop_partway "partitions are still present after macOS"
+  mac_id=${P_ID[1]}
+  query "$tmp/limits" apfs resizeContainer "$mac_id" limits -plist
+  limit=$(num "$tmp/limits" MaximumSize)
+  [ $((limit + gpt_pad)) -ge "$target" ] ||
+    stop_partway "macOS can only grow to $limit bytes, not ~$target; its container was not resized"
+  say "growing the macOS container $mac_id into freed space"
+  diskutil apfs resizeContainer "$mac_id" 0 || stop_partway "diskutil apfs resizeContainer $mac_id 0 failed"
+  snapshot
+  frame_unchanged_intel
+  [ $n -eq 2 ] || stop_partway "an unexpected partition appeared after macOS"
+  [ $((P_SIZE[1] + gpt_pad)) -ge "$target" ] ||
+    stop_partway "macOS is ${P_SIZE[1]} bytes after growing, expected ~$target"
+}
+
+main_intel() {
+  snapshot
+  recognize_intel
+  say "disk $disk: macOS store ${P_ID[1]} ($mac_uuid), $(awk -v s="$mac_size" 'BEGIN { printf "%.1f", s / 1073741824 }') GiB (Intel T2)"
+  i=0; while [ $i -lt $n ]; do describe $i; i=$((i + 1)); done
+  if [ "$kind" = free ]; then
+    say "no SmartRoom installation; $(( (target - mac_size) / MiB )) MiB free after macOS"
+    echo "Plan: grow the macOS container ${P_ID[1]} to ~$target bytes."
+    if [ $yes -eq 0 ]; then echo "Dry run: nothing changed. Add --yes to do it."; exit 0; fi
+    done_list="" left_list=" grow macOS"
+    grow_macos_intel
+    say "done: macOS ${P_ID[1]} is ${P_SIZE[1]} bytes"
+    exit 0
+  fi
+
+  evidence_intel
+  startup_check_intel
+  say "found SmartRoom Firmware: ESP ${M_ID[0]}$([ $m -gt 1 ] && echo ", Linux ${M_ID[1]}" || true)"
+  note "evidence: $evidence_text"
+  note "startup disk: $startup_text"
+  echo "Plan:"
+  local step=0
+  if [ "$startup" != macos ]; then
+    echo "  0. set the running macOS as the startup disk (bless --mount / --setBoot)"
+    step=1
+  fi
+  # Delete in reverse offset order (Linux before SmartRoom ESP) so erasing shrinks from the tail cleanly
+  j=$((m - 1))
+  while [ $j -ge 0 ]; do
+    echo "  $step. diskutil eraseVolume free none ${M_ID[j]}   (${M_KIND[j]}, ${M_UUID[j]})"
+    left_list="$left_list ${M_KIND[j]} ${M_UUID[j]};"
+    step=$((step + 1))
+    j=$((j - 1))
+  done
+  echo "  $step. diskutil apfs resizeContainer ${P_ID[1]} 0   (macOS grows into freed space)"
+  left_list="$left_list grow macOS"
+  if [ $yes -eq 0 ]; then
+    echo "Dry run: nothing changed. Add --yes to do it."
+    exit 0
+  fi
+  if [ "$startup" != macos ]; then
+    set_macos_startup_intel
+  fi
+  j=$((m - 1))
+  while [ $j -ge 0 ]; do
+    remove_member_intel $j
+    done_list="$done_list ${M_KIND[j]} ${M_UUID[j]} removed;"
+    left_list=${left_list#* ${M_KIND[j]} ${M_UUID[j]};}
+    j=$((j - 1))
+  done
+  grow_macos_intel
+  startup_check_intel
+  [ "$startup" = macos ] || echo "warning: startup disk reads as $startup_text; check Startup Disk"
+  say "done: SmartRoom Firmware removed; macOS ${P_ID[1]} is ${P_SIZE[1]} bytes; startup disk: $startup_text"
+  echo "Log: $log"
+}
+
 # --- main --------------------------------------------------------------------
+if [ "$arch" = x86_64 ]; then
+  main_intel
+  exit 0
+fi
 snapshot
 recognize
 say "disk $disk: macOS store ${P_ID[1]} ($mac_uuid), $(awk -v s="$mac_size" 'BEGIN { printf "%.1f", s / 1073741824 }') GiB"

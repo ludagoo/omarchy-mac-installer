@@ -1,0 +1,497 @@
+#!/bin/bash
+# Install SmartRoom Firmware onto internal partitions on a 2018 Intel T2 Mac
+# mini (Macmini8,1) directly from macOS, over SSH, with no USB stick.
+#
+#   sudo mini-install --payload ZIP --sha256 HEX [--installer-data JSON] \
+#     [--firstboot-env FILE | --no-firstboot-env] \
+#     [--source diskNsM|free] [--size BYTES|nM|nG|nT] \
+#     [--full-readback] [--state DIR] [--yes] [--reboot]
+#
+# Without --yes it checks all preconditions (F7/F20 protection) and prints
+# the partition/install plan; nothing on disk changes.
+# With --yes it:
+#   1. verifies the payload ZIP, MANIFEST SHA-256 digests, and firstboot.env;
+#   2. saves macOS's NVRAM boot path (efi-boot-device + efi-boot-device-data)
+#      before altering anything;
+#   3. shrinks macOS APFS (or uses existing trailing free space), keeping
+#      MinimumSize + 20 GiB by default (or honoring --size);
+#   4. creates a dedicated 2 GiB FAT32 EFI partition (volume id 0x2abf9f91)
+#      and a Linux root partition, writes root.img raw with SHA-256 readback;
+#   5. populates the SmartRoom ESP (esp/, smartroomos/firstboot.env, staged
+#      /usr/share/firmware/{wifi,bluetooth}, saved macOS NVRAM files);
+#   6. blesses EFI/BOOT/BOOTX64.EFI (--setBoot --shortform) and saves
+#      firmware-boot-device.{xml,bin}.
+#
+# One-time Recovery prerequisite (physical, once per Mini):
+#   Boot Recovery (Cmd+R): Utilities -> Startup Security Utility -> No Security,
+#   and Utilities -> Terminal -> csrutil disable.
+#
+# Tools: only macOS's built-in tools and /bin/bash 3.2 (never python3, git,
+# clang, xcrun, strings, jq or perl, avoiding Command Line Tools popups).
+set -euo pipefail
+export LC_ALL=C LANG=C
+PATH=/usr/bin:/bin:/usr/sbin:/sbin
+umask 077
+trap '' HUP PIPE
+
+die() { echo "mini-install: $*" >&2; exit 1; }
+say() { echo "== $*"; }
+usage() { sed -n '/^#   sudo /s/^#   //p; /^#     /s/^#     /  /p' "$0" >&2; exit 64; }
+
+payload="" sha="" metadata="" fbenv="" no_fbenv=0 source_arg="" size_arg=""
+readback=0 yes=0 reboot=0 state=/var/root/smartroom-mini-install
+
+while [ $# -gt 0 ]; do
+  case $1 in
+    --yes) yes=1; shift; continue ;;
+    --full-readback) readback=1; shift; continue ;;
+    --no-firstboot-env) no_fbenv=1; shift; continue ;;
+    --reboot) reboot=1; shift; continue ;;
+    -h|--help) usage ;;
+  esac
+  [ $# -ge 2 ] || die "unknown or incomplete argument: $1"
+  case $1 in
+    --payload) payload=$2 ;;
+    --sha256) sha=$2 ;;
+    --installer-data) metadata=$2 ;;
+    --firstboot-env) fbenv=$2 ;;
+    --source) source_arg=$2 ;;
+    --size) size_arg=$2 ;;
+    --state) state=$2 ;;
+    *) die "unknown argument: $1" ;;
+  esac
+  shift 2
+done
+
+[ "$(uname -s)" = Darwin ] && [ "$(uname -m)" = x86_64 ] || die "this runs on an Intel Mac (x86_64 macOS)"
+[ "$(id -u)" = 0 ] || die "run as root (sudo)"
+[ -n "$payload" ] && [ -f "$payload" ] || die "missing --payload ZIP"
+[ -n "$sha" ] || die "missing --sha256 HEX"
+sha=$(printf '%s' "$sha" | tr '[:upper:]' '[:lower:]')
+case $sha in
+  *[!0-9a-f]*|'') die "--sha256 must be 64 lowercase hex digits" ;;
+esac
+[ ${#sha} -eq 64 ] || die "--sha256 must be 64 hex digits"
+
+if [ -z "$metadata" ]; then
+  cand="$(dirname -- "$payload")/../installer_data.json"
+  if [ -f "$cand" ]; then
+    metadata=$cand
+  else
+    cand="$(dirname -- "$payload")/installer_data.json"
+    [ -f "$cand" ] && metadata=$cand
+  fi
+fi
+[ -n "$metadata" ] && [ -f "$metadata" ] || die "missing --installer-data JSON"
+[ -z "$fbenv" ] || [ "$no_fbenv" -eq 0 ] || die "--firstboot-env or --no-firstboot-env, not both"
+
+if [ -n "$fbenv" ]; then
+  [ -f "$fbenv" ] && [ "$(wc -c <"$fbenv" | tr -d ' ')" -le 65536 ] ||
+    die "--firstboot-env $fbenv is not a file of at most 64 KiB"
+  grep -Eq '^SMARTROOMOS_SERVER_URL=https?://[^[:space:]]+$' "$fbenv" ||
+    die "$fbenv has no SMARTROOMOS_SERVER_URL=http(s)://..."
+  grep -Eq '^SMARTROOMOS_AGENT_INSTALL_SHA256=[0-9a-fA-F]{64}$' "$fbenv" ||
+    die "$fbenv has no SMARTROOMOS_AGENT_INSTALL_SHA256=<64 hex digits>"
+  ! grep -q "$(printf '\r')" "$fbenv" || die "$fbenv has CR line endings"
+fi
+
+GiB=1073741824 MiB=1048576
+APPLE_BOOT_GUID="7c436110-ab2a-4bbb-a880-fe41995c9f82"
+T2_POLICY_GUID="94b73556-2197-4702-82a8-3e1337dafbfb"
+upper() { printf '%s' "$1" | tr '[:lower:]' '[:upper:]'; }
+lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+b64decode() { base64 -D 2>/dev/null || base64 -d; }
+
+tmp=$(mktemp -d /tmp/mini-install.XXXXXX)
+mounted_esp=""
+cleanup() {
+  if [ -n "$mounted_esp" ]; then
+    diskutil unmount "$mounted_esp" >/dev/null 2>&1 || true
+  fi
+  rm -rf "$tmp"
+}
+trap cleanup EXIT
+
+has() { plutil -extract "$2" xml1 -o - "$1" >/dev/null 2>&1; }
+get() { plutil -extract "$2" raw -o - "$1" 2>/dev/null; }
+need() {
+  local v
+  v=$(get "$1" "$2") && [ -n "$v" ] || die "missing key $2 in ${1##*/}"
+  printf '%s\n' "$v"
+}
+num() {
+  local v
+  v=$(need "$1" "$2")
+  case $v in ''|*[!0-9]*) die "non-numeric $2: $v" ;; esac
+  printf '%s\n' "$v"
+}
+query() {
+  local f=$1
+  shift
+  diskutil "$@" >"$f" 2>/dev/null || die "diskutil $* failed"
+}
+
+# ---- 1. Hardware & T2 security preconditions (before touching disk) --------
+say "checking hardware and T2 boot security"
+model=$(sysctl -n hw.model 2>/dev/null || true)
+[ "$model" = Macmini8,1 ] || die "expected Macmini8,1, found '${model:-unknown}'"
+
+sip_out=$(csrutil status 2>/dev/null || true)
+sip_ok=0
+case $sip_out in
+  *"System Integrity Protection status: disabled"*|*"NVRAM Protections: disabled"*) sip_ok=1 ;;
+esac
+[ "$sip_ok" -eq 1 ] ||
+  die "SIP protects NVRAM ($sip_out). Boot Recovery (Cmd+R), open Terminal, run 'csrutil disable'."
+
+if command -v firmwarepasswd >/dev/null 2>&1; then
+  fwpass=$(firmwarepasswd -check 2>/dev/null || true)
+  case $fwpass in
+    *"Password Enabled: Yes"*)
+      die "a firmware password is set ($fwpass); remove it in Startup Security Utility before installing" ;;
+  esac
+fi
+
+t2_nv=$(nvram "${T2_POLICY_GUID}:AppleSecureBootPolicy" 2>/dev/null || true)
+t2_sp=$(system_profiler SPiBridgeDataType -xml 2>/dev/null || true)
+t2_ok=0
+case $t2_nv in
+  *%00*) t2_ok=1 ;;
+  *%01*|*%02*)
+    die "T2 Secure Boot is not set to 'No Security' (nvram: $t2_nv). Boot Recovery (Cmd+R) -> Utilities -> Startup Security Utility -> select 'No Security'." ;;
+esac
+if [ "$t2_ok" -eq 0 ] && [ -n "$t2_sp" ]; then
+  printf '%s\n' "$t2_sp" >"$tmp/sp.plist"
+  sb=$(get "$tmp/sp.plist" 0._items.0.ibridge_secure_boot || true)
+  case $sb in
+    "No Security") t2_ok=1 ;;
+    "Full Security"|"Medium Security")
+      die "T2 Secure Boot is '$sb'. Boot Recovery (Cmd+R) -> Utilities -> Startup Security Utility -> select 'No Security'." ;;
+  esac
+fi
+[ "$t2_ok" -eq 1 ] ||
+  die "cannot verify T2 Secure Boot is 'No Security'. Boot Recovery (Cmd+R) -> Utilities -> Startup Security Utility -> select 'No Security'."
+
+# ---- 2. Validate payload & installer_data.json before touching disk ---------
+say "checking payload and installer_data.json"
+got_sha=$(shasum -a 256 "$payload" | awk '{print $1}')
+[ "$(lower "$got_sha")" = "$sha" ] || die "payload sha256 $got_sha != expected $sha"
+
+omarchy_target=$(need "$metadata" os_list.0.omarchy_target)
+[ "$omarchy_target" = intel-mini-full-os ] ||
+  die "installer_data.json omarchy_target is '$omarchy_target', expected 'intel-mini-full-os'"
+boot_object=$(need "$metadata" os_list.0.boot_object)
+[ "$boot_object" = "EFI/BOOT/BOOTX64.EFI" ] ||
+  die "installer_data.json boot_object must be EFI/BOOT/BOOTX64.EFI (got $boot_object)"
+
+esp_bytes="" esp_volid="" min_root_bytes="" pi=0
+while has "$metadata" "os_list.0.partitions.$pi"; do
+  ptype=$(get "$metadata" "os_list.0.partitions.$pi.type" || true)
+  pimg=$(get "$metadata" "os_list.0.partitions.$pi.image" || true)
+  psize=$(get "$metadata" "os_list.0.partitions.$pi.size" || true)
+  psize=${psize%B}
+  case $psize in ''|*[!0-9]*) die "invalid partition size in installer_data.json: $psize" ;; esac
+  if [ "$ptype" = EFI ]; then
+    esp_bytes=$psize
+    esp_volid=$(need "$metadata" "os_list.0.partitions.$pi.volume_id")
+  elif [ "$pimg" = root.img ]; then
+    min_root_bytes=$psize
+  fi
+  pi=$((pi + 1))
+done
+[ -n "$esp_bytes" ] && [ -n "$esp_volid" ] && [ -n "$min_root_bytes" ] ||
+  die "installer_data.json missing EFI or root.img partition contract"
+
+unzip -t -q "$payload" || die "payload ZIP integrity check failed (unzip -t)"
+zip_list=$(unzip -Z1 "$payload" 2>/dev/null || unzip -l "$payload" | awk 'NR>3 && NF>=4 {print $NF}')
+for req in root.img MANIFEST esp/EFI/BOOT/BOOTX64.EFI esp/limine.conf esp/EFI/Linux/smartroomos_linux-t2.efi; do
+  printf '%s\n' "$zip_list" | grep -qx "$req" || die "payload ZIP missing $req"
+done
+root_img_zip_bytes=$(unzip -l "$payload" root.img | awk '$NF == "root.img" {print $1; exit}')
+case $root_img_zip_bytes in ''|*[!0-9]*) die "cannot read root.img size from ZIP" ;; esac
+[ $((root_img_zip_bytes % 4096)) -eq 0 ] || die "root.img ($root_img_zip_bytes) is not 4 KiB aligned"
+
+# ---- 3. Inspect internal disk & partition plan (F7/F20 protection) ----------
+snapshot() {
+  local f=$tmp/s i id k v line
+  query "$f.root" info -plist /
+  [ "$(get "$f.root" Internal)" = true ] || die "macOS is not running from the internal disk"
+  has "$f.root" APFSPhysicalStores.0 && ! has "$f.root" APFSPhysicalStores.1 ||
+    die "running macOS must live on exactly one APFS physical store"
+  mac_store=$(need "$f.root" APFSPhysicalStores.0.APFSPhysicalStore)
+  mac_ref=$(need "$f.root" APFSContainerReference)
+  query "$f.store" info -plist "$mac_store"
+  disk=$(need "$f.store" ParentWholeDisk)
+  mac_store_uuid=$(upper "$(need "$f.store" DiskUUID)")
+  query "$f.disk" info -plist "$disk"
+  [ "$(get "$f.disk" Internal)" = true ] && [ "$(get "$f.disk" WholeDisk)" = true ] &&
+    [ "$(get "$f.disk" Content)" = GUID_partition_scheme ] || die "$disk is not the internal GPT disk"
+  disk_size=$(num "$f.disk" Size)
+
+  query "$f.list" list -plist "$disk"
+  i=0 k=""
+  while has "$f.list" "AllDisksAndPartitions.$i"; do
+    if [ "$(get "$f.list" "AllDisksAndPartitions.$i.DeviceIdentifier")" = "$disk" ]; then
+      k=$i; break
+    fi
+    i=$((i + 1))
+  done
+  [ -n "$k" ] || die "diskutil list missing $disk"
+  : >"$f.order"
+  i=0
+  while has "$f.list" "AllDisksAndPartitions.$k.Partitions.$i"; do
+    [ $i -lt 32 ] || die "$disk has more than 32 partitions"
+    id=$(need "$f.list" "AllDisksAndPartitions.$k.Partitions.$i.DeviceIdentifier")
+    query "$f.p$i" info -plist "$id"
+    v=$(num "$f.p$i" PartitionMapPartitionOffset)
+    echo "$v $i" >>"$f.order"
+    i=$((i + 1))
+  done
+  [ $i -gt 0 ] || die "$disk has no partitions"
+  P_ID=() P_UUID=() P_TYPE=() P_OFF=() P_SIZE=() P_NAME=()
+  n=0
+  while read -r line; do
+    k=${line#* }
+    P_ID[n]=$(need "$f.p$k" DeviceIdentifier)
+    P_UUID[n]=$(upper "$(need "$f.p$k" DiskUUID)")
+    P_TYPE[n]=$(need "$f.p$k" Content)
+    P_OFF[n]=$(num "$f.p$k" PartitionMapPartitionOffset)
+    P_SIZE[n]=$(num "$f.p$k" Size)
+    P_NAME[n]=$(get "$f.p$k" VolumeName || true)
+    n=$((n + 1))
+  done < <(sort -n "$f.order")
+}
+
+say "inspecting internal disk"
+snapshot
+[ "$n" -eq 2 ] ||
+  die "refusing: $disk already has $n partitions (expected 2: Apple EFI + macOS APFS); run remove-firmware first if SmartRoom is already installed"
+[ "${P_TYPE[0]}" = EFI ] && [ "${P_TYPE[1]}" = Apple_APFS ] && [ "${P_UUID[1]}" = "$mac_store_uuid" ] ||
+  die "refusing: unexpected disk layout on $disk (${P_TYPE[0]}, ${P_TYPE[1]}); expected Apple EFI + running macOS APFS"
+
+mac_id=${P_ID[1]}
+mac_off=${P_OFF[1]}
+mac_size=${P_SIZE[1]}
+apple_efi_uuid=${P_UUID[0]}
+free_tail=$((disk_size - mac_off - mac_size))
+gpt_pad=$((16 * MiB))
+min_needed=$((esp_bytes + root_img_zip_bytes + gpt_pad))
+if [ "$min_needed" -lt $((esp_bytes + min_root_bytes)) ]; then
+  min_needed=$((esp_bytes + min_root_bytes))
+fi
+
+parse_size_arg() {
+  local raw=$1 num unit
+  case $raw in
+    *T) num=${raw%T}; unit=$((1024 * GiB)) ;;
+    *G) num=${raw%G}; unit=$GiB ;;
+    *M) num=${raw%M}; unit=$MiB ;;
+    *) num=$raw; unit=1 ;;
+  esac
+  case $num in ''|*[!0-9]*) die "--size must be BYTES or <N>M|G|T" ;; esac
+  echo $((num * unit))
+}
+
+query "$tmp/limits" apfs resizeContainer "$mac_id" limits -plist
+mac_min=$(num "$tmp/limits" MinimumSize)
+mac_cur=$(num "$tmp/limits" CurrentSize)
+
+mode="" resize_mac_to="" alloc_total=0
+if [ "$source_arg" = free ] || { [ -z "$source_arg" ] && [ "$free_tail" -ge "$min_needed" ]; }; then
+  [ "$free_tail" -ge "$min_needed" ] ||
+    die "only $((free_tail / GiB)) GiB free after $mac_id, need $((min_needed / GiB)) GiB"
+  mode=free
+  alloc_total=$((free_tail - gpt_pad))
+  if [ -n "$size_arg" ]; then
+    req=$(parse_size_arg "$size_arg")
+    [ "$req" -ge "$min_needed" ] && [ "$req" -le "$alloc_total" ] ||
+      die "--size $size_arg out of bounds for free space ($((min_needed / GiB))..$((alloc_total / GiB)) GiB)"
+    alloc_total=$req
+  fi
+else
+  [ -z "$source_arg" ] || [ "$source_arg" = "$mac_id" ] ||
+    die "--source must be $mac_id or free (got $source_arg)"
+  mode=resize
+  if [ -n "$size_arg" ]; then
+    alloc_total=$(parse_size_arg "$size_arg")
+  else
+    keep=$((mac_min + 20 * GiB))
+    avail=$((mac_cur - keep))
+    [ "$avail" -gt 0 ] || die "macOS ($((mac_cur / GiB)) GiB) cannot keep MinimumSize ($((mac_min / GiB)) GiB) + 20 GiB"
+    alloc_total=$(( (avail / GiB) * GiB ))
+  fi
+  [ "$alloc_total" -ge "$min_needed" ] ||
+    die "available space for SmartRoom ($((alloc_total / GiB)) GiB) is below required $((min_needed / GiB)) GiB"
+  resize_mac_to=$((mac_cur - alloc_total))
+  [ "$resize_mac_to" -ge "$mac_min" ] ||
+    die "target macOS size $((resize_mac_to / GiB)) GiB is below MinimumSize $((mac_min / GiB)) GiB"
+fi
+
+linux_target_bytes=$((alloc_total - esp_bytes))
+[ "$linux_target_bytes" -ge "$root_img_zip_bytes" ] ||
+  die "Linux partition target ($linux_target_bytes bytes) < root.img ($root_img_zip_bytes bytes)"
+
+echo "Plan ($disk):"
+echo "  protected: ${P_ID[0]} (Apple EFI, $apple_efi_uuid), ${P_ID[1]} (macOS APFS, $mac_store_uuid)"
+if [ "$mode" = resize ]; then
+  echo "  1. shrink $mac_id from $((mac_cur / GiB)) GiB to $((resize_mac_to / GiB)) GiB (min $((mac_min / GiB)) GiB)"
+else
+  echo "  1. keep $mac_id at $((mac_cur / GiB)) GiB (use $((alloc_total / GiB)) GiB trailing free space)"
+fi
+echo "  2. addPartition 2 GiB %EFI% (FAT32 'EFI - Smart', id $esp_volid)"
+echo "  3. addPartition $((linux_target_bytes / GiB)) GiB %Linux%, write root.img ($((root_img_zip_bytes / MiB)) MiB) + SHA-256 readback"
+echo "  4. populate SmartRoom ESP (esp/, firstboot.env=$([ -n "$fbenv" ] && echo yes || echo none), /usr/share/firmware, macOS NVRAM)"
+echo "  5. bless --mount <ESP> --setBoot --file <ESP>/$boot_object --shortform"
+
+if [ "$yes" -eq 0 ]; then
+  echo "Dry run: nothing changed. Add --yes to install."
+  exit 0
+fi
+
+# ---- 4. Execute install -----------------------------------------------------
+mkdir -p "$state"; chmod 700 "$state"
+run="$state/run-$(date +%Y%m%d-%H%M%S)-$$"
+mkdir -m 700 "$run"
+exec > >(tee -a "$run/mini-install.log") 2>&1
+say "install run $run"
+
+unpack="$run/unpack"
+mkdir -m 700 "$unpack"
+say "1/6 unpacking payload and verifying MANIFEST"
+unzip -q "$payload" -d "$unpack"
+while IFS= read -r line; do
+  case $line in
+    ""|"#"*) continue ;;
+  esac
+  want_h=$(printf '%s\n' "$line" | awk '{print $1}')
+  rel=$(printf '%s\n' "$line" | awk '{sub(/^[^[:space:]]+[[:space:]]+/, ""); print}')
+  [ -n "$want_h" ] && [ -n "$rel" ] && [ -f "$unpack/$rel" ] || die "bad MANIFEST entry: $line"
+  got_h=$(shasum -a 256 "$unpack/$rel" | awk '{print $1}')
+  [ "$got_h" = "$want_h" ] || die "MANIFEST mismatch for $rel ($got_h != $want_h)"
+done <"$unpack/MANIFEST"
+root_img_bytes=$(wc -c <"$unpack/root.img" | tr -d ' ')
+[ "$root_img_bytes" = "$root_img_zip_bytes" ] || die "extracted root.img size mismatch"
+
+say "2/6 saving pre-install macOS NVRAM boot path"
+nvram -x -p >"$run/pre-nvram.plist" 2>/dev/null || true
+save_nv_pair() {
+  local plist=$1 prefix=$2 out_base=$3 xml_snip
+  if has "$plist" "${APPLE_BOOT_GUID}:efi-boot-${prefix}"; then
+    xml_snip=$(plutil -extract "${APPLE_BOOT_GUID}:efi-boot-${prefix}" xml1 -o - "$plist" 2>/dev/null || true)
+    case $xml_snip in
+      *"<string>"*)
+        get "$plist" "${APPLE_BOOT_GUID}:efi-boot-${prefix}" >"${out_base}.xml" || true ;;
+      *)
+        get "$plist" "${APPLE_BOOT_GUID}:efi-boot-${prefix}" | tr -d '\n\r ' | b64decode >"${out_base}.xml" || true ;;
+    esac
+  fi
+  if has "$plist" "${APPLE_BOOT_GUID}:efi-boot-${prefix}-data"; then
+    get "$plist" "${APPLE_BOOT_GUID}:efi-boot-${prefix}-data" | tr -d '\n\r ' | b64decode >"${out_base}.bin" || true
+  fi
+}
+save_nv_pair "$run/pre-nvram.plist" device "$run/macos-boot-device"
+
+if [ "$mode" = resize ]; then
+  say "3/6 shrinking macOS container $mac_id to $resize_mac_to bytes"
+  if command -v tmutil >/dev/null 2>&1; then
+    tmutil deletelocalsnapshots / >/dev/null 2>&1 || true
+  fi
+  diskutil apfs resizeContainer "$mac_id" "${resize_mac_to}B" ||
+    die "diskutil apfs resizeContainer $mac_id ${resize_mac_to}B failed"
+else
+  say "3/6 keeping $mac_id size ($mac_cur bytes)"
+fi
+
+say "4/6 creating SmartRoom ESP and Linux root partitions"
+diskutil addPartition "$mac_id" %EFI% %noformat% "${esp_bytes}B" ||
+  die "diskutil addPartition %EFI% failed"
+snapshot
+[ "$n" -eq 3 ] && [ "${P_UUID[0]}" = "$apple_efi_uuid" ] && [ "${P_UUID[1]}" = "$mac_store_uuid" ] ||
+  die "unexpected partition table after adding SmartRoom ESP"
+esp_id=${P_ID[2]}
+[ "${P_TYPE[2]}" = EFI ] || die "$esp_id has type ${P_TYPE[2]}, expected EFI"
+diskutil unmount "$esp_id" >/dev/null 2>&1 || true
+newfs_msdos -F 32 -v "EFI - Smart" -I "$esp_volid" "/dev/r${esp_id}" >/dev/null ||
+  die "newfs_msdos on /dev/r${esp_id} failed"
+
+diskutil addPartition "$esp_id" %Linux% %noformat% 0 ||
+  die "diskutil addPartition %Linux% failed"
+snapshot
+[ "$n" -eq 4 ] && [ "${P_UUID[0]}" = "$apple_efi_uuid" ] && [ "${P_UUID[1]}" = "$mac_store_uuid" ] ||
+  die "unexpected partition table after adding Linux root"
+root_id=${P_ID[3]}
+root_part_bytes=${P_SIZE[3]}
+[ "$root_part_bytes" -ge "$root_img_bytes" ] ||
+  die "$root_id ($root_part_bytes bytes) is smaller than root.img ($root_img_bytes bytes)"
+diskutil unmount "$root_id" >/dev/null 2>&1 || true
+
+say "5/6 writing root.img to /dev/r${root_id} and verifying SHA-256"
+dd if="$unpack/root.img" of="/dev/r${root_id}" bs=1048576 2>/dev/null ||
+  die "raw write of root.img to /dev/r${root_id} failed"
+sync
+want_root_sha=$(shasum -a 256 "$unpack/root.img" | awk '{print $1}')
+full_mib=$((root_img_bytes / 1048576))
+rem_4k=$(( (root_img_bytes % 1048576) / 4096 ))
+got_root_sha=$({
+  if [ "$full_mib" -gt 0 ]; then
+    dd if="/dev/r${root_id}" bs=1048576 count="$full_mib" 2>/dev/null
+  fi
+  if [ "$rem_4k" -gt 0 ]; then
+    dd if="/dev/r${root_id}" bs=4096 skip="$((full_mib * 256))" count="$rem_4k" 2>/dev/null
+  fi
+} | shasum -a 256 | awk '{print $1}')
+[ "$got_root_sha" = "$want_root_sha" ] ||
+  die "root.img SHA-256 readback mismatch on /dev/r${root_id} ($got_root_sha != $want_root_sha)"
+echo "root.img verified on /dev/r${root_id} ($want_root_sha)"
+[ "$readback" -eq 0 ] || echo "full readback completed"
+
+say "6/6 staging SmartRoom ESP and blessing $boot_object"
+diskutil mount "$esp_id" >/dev/null || die "could not mount SmartRoom ESP $esp_id"
+mounted_esp=$esp_id
+query "$tmp/esp.info" info -plist "$esp_id"
+esp_mp=$(need "$tmp/esp.info" MountPoint)
+[ -d "$esp_mp" ] || die "ESP mount point missing: $esp_mp"
+
+cp -RX "$unpack/esp/." "$esp_mp/"
+mkdir -p "$esp_mp/smartroomos"
+if [ -n "$fbenv" ]; then
+  cp -X "$fbenv" "$esp_mp/smartroomos/firstboot.env"
+fi
+mac_fw_dir=${SMARTROOM_MAC_FIRMWARE_DIR:-/usr/share/firmware}
+if [ -d "$mac_fw_dir/wifi" ]; then
+  mkdir -p "$esp_mp/smartroomos/macos-firmware/wifi"
+  cp -RX "$mac_fw_dir/wifi/." "$esp_mp/smartroomos/macos-firmware/wifi/"
+fi
+if [ -d "$mac_fw_dir/bluetooth" ]; then
+  mkdir -p "$esp_mp/smartroomos/macos-firmware/bluetooth"
+  cp -RX "$mac_fw_dir/bluetooth/." "$esp_mp/smartroomos/macos-firmware/bluetooth/"
+fi
+[ ! -s "$run/macos-boot-device.xml" ] || cp -X "$run/macos-boot-device.xml" "$esp_mp/smartroomos/"
+[ ! -s "$run/macos-boot-device.bin" ] || cp -X "$run/macos-boot-device.bin" "$esp_mp/smartroomos/"
+
+[ -s "$esp_mp/$boot_object" ] || die "missing $boot_object on SmartRoom ESP"
+bless --mount "$esp_mp" --setBoot --file "$esp_mp/$boot_object" --shortform ||
+  die "bless --mount $esp_mp --setBoot --file $esp_mp/$boot_object --shortform failed"
+
+nvram -d "${APPLE_BOOT_GUID}:efi-boot-next" >/dev/null 2>&1 || true
+nvram -d "${APPLE_BOOT_GUID}:efi-boot-next-data" >/dev/null 2>&1 || true
+nvram -x -p >"$run/post-nvram.plist" 2>/dev/null || true
+save_nv_pair "$run/post-nvram.plist" device "$run/firmware-boot-device"
+[ ! -s "$run/firmware-boot-device.xml" ] || cp -X "$run/firmware-boot-device.xml" "$esp_mp/smartroomos/"
+[ ! -s "$run/firmware-boot-device.bin" ] || cp -X "$run/firmware-boot-device.bin" "$esp_mp/smartroomos/"
+
+boot_now=$(bless --getBoot 2>/dev/null || true)
+find "$esp_mp" -name '._*' -delete 2>/dev/null || true
+sync
+diskutil unmount "$esp_id" >/dev/null || die "could not unmount $esp_id"
+mounted_esp=""
+rm -rf "$unpack"
+
+say "installed SmartRoom Firmware onto $disk ($esp_id ESP, $root_id root)"
+echo "blessed startup disk: ${boot_now:-$esp_id}"
+echo "switch back to macOS anytime: sudo smartroom-boot-os macos"
+if [ "$reboot" -eq 1 ]; then
+  shutdown -r now
+else
+  echo "ready to boot SmartRoom Firmware: sudo shutdown -r now"
+fi
