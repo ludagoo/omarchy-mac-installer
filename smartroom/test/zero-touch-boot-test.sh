@@ -158,6 +158,13 @@ grep -Eq 'KERNEL_CMDLINE\[default\]="[^"]*panic=10"' "$etc/limine" ||
   fail "first boot added a checksum to limine.conf"
 echo "ok - first boot keeps ENABLE_VERIFICATION=no and panic=10"
 
+# The image's menu says timeout: 0; first boot's leaf and its menu defaults keep that.
+sed -i 's/^timeout:.*/timeout: 0/' "$esp/limine.conf"
+OMARCHY_IMAGE_BOOT_REBUILD="$request" leaf >/dev/null || fail "limine-boot.sh failed on a timeout: 0 menu"
+grep -qx 'timeout: 0' "$esp/limine.conf" && [[ $(grep -c '^timeout:' "$esp/limine.conf") == 1 ]] ||
+  fail "first boot changed timeout: 0 ($(grep timeout "$esp/limine.conf"))"
+echo "ok - first boot keeps timeout: 0"
+
 # What the deferred rebuild writes: no checksum, panic=10 on the UKI line.
 rm -f "$request" "$esp/EFI/Linux/omarchy_linux-aurora.efi"
 cp "$test_tmp/runtime/default/limine/limine.conf" "$esp/limine.conf"
@@ -169,4 +176,43 @@ grep -qx limine-update "$calls" || fail "the rebuild did not run limine-update"
 grep -Eq '^ *cmdline:.*panic=10([[:space:]]|$)' "$esp/limine.conf" ||
   fail "the rebuilt UKI command line has no panic=10 ($(grep cmdline "$esp/limine.conf"))"
 echo "ok - the rebuilt limine.conf has no checksum and the UKI line has panic=10"
+
+# --- Never wait at boot (SmartRoom Firmware WS1): the builder's own functions, run on a scratch root.
+fns=$(sed -n '/^SMARTROOM_SAFETY_CMDLINE=/p; /^grub_default_has_word() {/,/^}/p; /^add_safety_words() {/,/^}/p; /^force_zero_wait() {/,/^}/p' "$builder")
+[[ $fns == *force_zero_wait* && $fns == *add_safety_words* ]] || fail "the builder lost add_safety_words or force_zero_wait"
+sandbox() { # sandbox 'commands': the functions, profile=smartroom, a scratch target
+  ( profile=smartroom; target=$test_tmp/target; fail() { echo "builder fail: $*" >&2; exit 1; }
+    eval "$fns"; eval "$1" )
+}
+mkdir -p "$test_tmp/target/boot/efi" "$test_tmp/target/etc/default"
+printf 'GRUB_CMDLINE_LINUX_DEFAULT="quiet splash panic=10"\n' >"$test_tmp/target/etc/default/grub"
+sandbox 'add_safety_words "$target/etc/default/grub"; add_safety_words "$target/etc/default/grub"' || fail "add_safety_words"
+line=$(cat "$test_tmp/target/etc/default/grub")
+[[ $line == 'GRUB_CMDLINE_LINUX_DEFAULT="quiet splash panic=10 oops=panic softlockup_panic=1 systemd.watchdog_sec=30"' ]] ||
+  fail "safety words appended once and panic=10 kept: $line"
+printf 'GRUB_CMDLINE_LINUX_DEFAULT="quiet systemd.watchdog_sec=300"\n' >"$test_tmp/target/etc/default/grub"
+sandbox 'add_safety_words "$target/etc/default/grub"' || fail "add_safety_words on a different value"
+grep -Eq ' systemd.watchdog_sec=30"$' "$test_tmp/target/etc/default/grub" || fail "word match is exact, not a prefix"
+# Menu timeouts: Omarchy's 1, the leaf's 3, none at all -> 0, with one timeout line.
+for start in 'timeout: 1' 'timeout: 3' 'timeout: 10' ''; do
+  printf '%s\nquiet: yes\n/+SmartRoom Firmware\n  path: boot():/EFI/Linux/omarchy_linux-aurora.efi\n' "$start" >"$test_tmp/target/boot/efi/limine.conf"
+  sandbox force_zero_wait || fail "force_zero_wait on '$start'"
+  [[ $(grep -c '^timeout:' "$test_tmp/target/boot/efi/limine.conf") == 1 ]] &&
+    grep -qx 'timeout: 0' "$test_tmp/target/boot/efi/limine.conf" || fail "timeout: 0 from '$start'"
+done
+printf 'timeout: 0\n/+X\n  path: boot():/EFI/Linux/a.efi#%s\n' "$(printf 'a%.0s' $(seq 128))" >"$test_tmp/target/boot/efi/limine.conf"
+! sandbox force_zero_wait 2>/dev/null || fail "a file checksum on a path must stop the build"
+# It runs after the Limine activation, before the UKI command line is verified.
+act_at=$(grep -n '^  force_zero_wait$' "$builder" | head -n 1 | cut -d: -f1)
+unset_at=$(grep -n '^  verify_uki_cmdline$' "$builder" | head -n 1 | cut -d: -f1)
+[[ -n $act_at && -n $unset_at ]] && (( act_at < unset_at )) || fail "force_zero_wait is not called right after the activation"
+# The word list is the firmware's (docs/boot-integrity-rollback.md), when its checkout is here.
+fw=${SMARTROOM_FIRMWARE:-$(cd -- "$installer/../smartroomcontrollerfirmware" 2>/dev/null && pwd || true)}
+if [[ -n $fw && -f $fw/overlay/usr/local/lib/smartroomos/install-lib.sh ]]; then
+  want=$(bash -c 'source "$1"; smartroomos_boot_safety_cmdline' _ "$fw/overlay/usr/local/lib/smartroomos/install-lib.sh")
+  have=$(sed -n "s/^SMARTROOM_SAFETY_CMDLINE='\(.*\)'\$/\1/p" "$builder")
+  [[ $want == "$have" ]] || fail "the builder's safety words differ from the firmware's: '$have' vs '$want'"
+  echo "ok - the builder's safety words equal the firmware's"
+fi
+echo "ok - the builder forces timeout: 0, refuses checksums, and adds the boot safety words once"
 echo "PASS zero-touch-boot"

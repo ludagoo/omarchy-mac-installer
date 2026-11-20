@@ -33,3 +33,13 @@ usr/local/sbin/smartroomos-efi-vars-save
 # Packages: the image's pacman.conf and mirror list are Omarchy's stable template.
 etc/pacman.conf
 etc/pacman.d/*
+# Put back (a line starting with ! re-includes a path an earlier line left out):
+# the Studio never waits at boot and reboots on every failure, like the Mini.
+# These are small, additive files, not Omarchy's boot logic: the panic/watchdog
+# sysctls, systemd's watchdog drop-in, and the mkinitcpio drop-in that appends
+# our safety hook (usr/lib/initcpio/{install,hooks}/smartroomos-safety are not
+# excluded above; the integrity check, the rollback command and their units are
+# not either). Limine's timeout and checksums stay the image builder's.
+!etc/sysctl.d/10-smartroomos-panic.conf
+!etc/systemd/system.conf.d/smartroomos-watchdog.conf
+!etc/mkinitcpio.conf.d/zz-smartroomos-safety.conf
