@@ -90,6 +90,23 @@ cmdline=$(sed -n 's/^ *cmdline: //p' "$m/boot/efi/limine.conf" | head -n 1)
 echo "Limine cmdline: $cmdline"
 echo "Limine entries: $(grep -E '^/' "$m/boot/efi/limine.conf" | paste -sd' ' -)"
 echo "Limine timeout: $(sed -n 's/^timeout: //p' "$m/boot/efi/limine.conf")"
+# The programs the room runs find their shared libraries. A prebuilt package (the room
+# browser) names the sonames it was built against; the channel can move past them
+# (2026-11-24: chromium-smartroom wanted libsimdutf.so.36, the channel had .so.37).
+unresolved=$(chroot "$m" env -i PATH=/usr/bin /usr/bin/bash -c '
+  for f in /usr/lib/chromium/* /usr/bin/chromium /usr/bin/Hyprland /usr/bin/hyprctl /usr/bin/greetd \
+           /usr/bin/wf-recorder /usr/bin/ffmpeg /usr/bin/cloudflared /usr/bin/python3 /usr/bin/pipewire \
+           /usr/bin/wireplumber /usr/bin/sshd /usr/bin/NetworkManager /usr/bin/sudo /usr/bin/systemctl; do
+    [[ -f $f && ! -L $f ]] || continue
+    [[ $f != /usr/lib/chromium/lib*_shim.so ]] || continue   # Qt/GTK UI shims: loaded only if that toolkit is there
+    ldd "$f" 2>/dev/null | sed -n "s|^[[:space:]]*\([^[:space:]]*\) => not found|$f: \1|p"
+  done' 2>&1)
+if [[ -z $unresolved ]]; then
+  pass "the room browser and the programs the room runs find their shared libraries"
+else
+  failed "programs whose shared libraries are missing:"
+  while IFS= read -r line; do printf '  %s\n' "$line"; done <<<"$unresolved" | head -n 40
+fi
 # The root invariant: the image's own smartroom-release check-root, the one rule
 # that build-release, the room's trial and its integrity check also run (owners,
 # /, /etc, /usr, sudoers, visudo -c). Its exceptions are in that code, with reasons.

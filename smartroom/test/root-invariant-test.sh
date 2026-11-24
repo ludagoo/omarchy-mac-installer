@@ -16,6 +16,8 @@ if grep -v '^[[:space:]]*#' "$sr/desk-check" | grep -nE 'find etc usr opt|owner-
 else
   ok "desk-check has no second owner rule"
 fi
+grep -q 'ldd "$f"' "$sr/desk-check" && grep -q '/usr/lib/chromium/*' "$sr/desk-check" &&
+  ok "desk-check fails a program whose shared libraries are missing (the room browser included)" || bad "desk-check does not check shared libraries"
 [[ ! -e $sr/room/owner-allow ]] && ok "no owner allow-list (exceptions live in check-root, with reasons)" || bad "room/owner-allow is back"
 grep -qE '^smartroom-release([[:space:]]|$)' "$sr/room/packages" && ok "the image ships smartroom-release" || bad "room/packages lacks smartroom-release"
 grep -q 'build-release --id "$id" --out "$out" --source-path "$top/@" --line studio' "$sr/release-pack" &&
