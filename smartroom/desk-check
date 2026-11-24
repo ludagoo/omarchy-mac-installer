@@ -90,23 +90,15 @@ cmdline=$(sed -n 's/^ *cmdline: //p' "$m/boot/efi/limine.conf" | head -n 1)
 echo "Limine cmdline: $cmdline"
 echo "Limine entries: $(grep -E '^/' "$m/boot/efi/limine.conf" | paste -sd' ' -)"
 echo "Limine timeout: $(sed -n 's/^timeout: //p' "$m/boot/efi/limine.conf")"
-# Every file under /etc, /usr and /opt is root's, unless smartroom/room/owner-allow
-# says otherwise: a file the build user left behind belongs to uid 1000, the
-# room's own user (sudo then ignores a sudoers file, and the kiosk user could
-# rewrite root's units). System groups of packages (polkitd, tty, dbus) pass.
-allow=$(dirname -- "${BASH_SOURCE[0]}")/room/owner-allow
-owners=$(cd "$m" && find etc usr opt -xdev \( ! -uid 0 -o -gid +999 \) -printf '%p %U:%G\n' 2>/dev/null |
-  while read -r path owner; do
-    awk -v p="$path" -v o="$owner" '$1 == p && $2 == o { found = 1 } END { exit !found }' "$allow" 2>/dev/null ||
-      echo "/$path $owner"
-  done)
-if [[ -z $owners ]]; then
-  pass "every file under /etc, /usr, /opt is root's (or in room/owner-allow)"
+# The root invariant: the image's own smartroom-release check-root, the one rule
+# that build-release, the room's trial and its integrity check also run (owners,
+# /, /etc, /usr, sudoers, visudo -c). Its exceptions are in that code, with reasons.
+if inv=$(chroot "$m" env -i PATH=/usr/bin:/usr/sbin python3 -I /usr/bin/smartroom-release check-root / 2>&1); then
+  pass "root invariant: ${inv%%$'\n'*}"
 else
-  failed "files under /etc, /usr, /opt owned by a non-root user or group ($(wc -l <<<"$owners")):"
-  sed 's/^/  /' <<<"$owners" | head -n 40
+  failed "root invariant (smartroom-release check-root):"
+  sed 's/^/  /' <<<"$inv" | head -n 40
 fi
-check "sudoers and sudoers.d parse, with the owner and mode sudo requires" chroot "$m" visudo -c -q
 if [[ -e $m/etc/omarchy-mac-boot/headless ]]; then
   echo "== SmartRoom image"
   # This branch is the edge image. The enrolled first stage is the payload's
