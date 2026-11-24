@@ -97,7 +97,7 @@ if inv=$(chroot "$m" env -i PATH=/usr/bin:/usr/sbin python3 -I /usr/bin/smartroo
   pass "root invariant: ${inv%%$'\n'*}"
 else
   failed "root invariant (smartroom-release check-root):"
-  sed 's/^/  /' <<<"$inv" | head -n 40
+  while IFS= read -r line; do printf '  %s\n' "$line"; done <<<"$inv" | head -n 40
 fi
 if [[ -e $m/etc/omarchy-mac-boot/headless ]]; then
   echo "== SmartRoom image"

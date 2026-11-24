@@ -28,6 +28,6 @@ code() { set +e; bash "$sr/release-pack" "$@" >"$t/out" 2>&1; echo $?; set -e; }
 [[ $(code z "$t/o" --id x --work "$t/w" --sign-key ABC) == 64 ]] && ok "a signature needs the public key to check it" || bad "--sign-key without --key-asc"
 [[ $(code z "$t/o" --id x --work /tmp/w) == 64 ]] && ok "the work directory is not /tmp" || bad "release-pack accepted /tmp"
 if (( EUID != 0 )); then
-  [[ $(code z "$t/o" --id x --work "$t/w") == 1 ]] && grep -q 'run as root' "$t/out" && ok "release-pack needs root" || bad "release-pack ran without root"
+  [[ $(code z "$t/o" --id x --work /nonexistent-release-pack-test/w) == 1 ]] && grep -q 'run as root' "$t/out" && ok "release-pack needs root" || bad "release-pack ran without root"
 fi
 exit $fail
