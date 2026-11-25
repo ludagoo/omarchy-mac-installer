@@ -112,9 +112,10 @@ every inherited workflow (`gh workflow disable` each one except
 `mac-upload`, `mac-catalog-sign`, `mac-promote`, `mac-app-release` …) would
 otherwise run on upstream's triggers.
 
-Zero-touch settings (Limine checksums off, `panic=10`) and the disk-split
-default (macOS keeps its minimum + 20 GiB when the install shrinks macOS)
-come along from `smartroom/main`. They are unchanged here.
+Zero-touch settings (Limine checksums off, `panic=10`) come along from
+`smartroom/main` unchanged. The disk-split default changed here on 2026-11-25:
+when the install shrinks macOS, macOS keeps only the engine's minimum (which
+already includes the installer's own reserve); the extra 20 GiB is gone.
 
 `smartroom/main` is what a stable SmartRoom Firmware image builds with:
 omacom's `main` (mirrored here as `main`, fast-forward only) plus
