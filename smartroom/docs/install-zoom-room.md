@@ -73,15 +73,16 @@ On the Mac (or through Jamf):
 --size N`) or from free space. N is the whole SmartRoom Firmware install: the
 stub (2.5 GB), the ESP (500 MiB), Boot (2 GiB) and Root (the rest).
 
-Lucas's rule (2026-11-07, restated 2026-11-17): **macOS keeps only what it needs; SmartRoom
+Lucas's rule (2026-11-07, restated 2026-11-17, narrowed 2026-11-25): **macOS keeps only what it needs; SmartRoom
 Firmware gets the rest of the disk.** macOS stays only for the Zoom Rooms transition.
 
 - The dry run lists the macOS container with `minimum_container_bytes` (what macOS itself needs;
   about 77.5 GB on the M2 Max Studio with macOS 14.5).
 - `engine-install` applies the rule itself: with `--source <macOS container>` and no `--size`,
-  macOS keeps that minimum plus 20 GiB for its own updates and SmartRoom Firmware gets the rest
-  (it prints the split). On a 500 GB Studio that is about 100 GB for macOS and about 390 GB for
-  SmartRoom Firmware. `--size N` overrides it; don't use it for room installs.
+  macOS keeps exactly that minimum (it already includes the installer's ~20 GiB reserve over
+  Apple's recommended size; rooms never install macOS updates) and SmartRoom Firmware gets the
+  rest (it prints the split). On a 500 GB Studio with a clean macOS that is about 95 GB for macOS
+  and about 400 GB for SmartRoom Firmware. `--size N` overrides it; don't use it for room installs.
 - The engine's floor is ~38.5 GB (Root's 32 GiB minimum from `installer_data.json`); never go near it.
 
 If a Mac was installed with a smaller Root, it can be grown later without a reinstall or 1TR:
