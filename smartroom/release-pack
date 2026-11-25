@@ -1,0 +1,75 @@
+#!/bin/bash
+# Make the Studio's smartroom-release release from a built, desk-checked image, as root:
+#   smartroom/release-pack ZIP OUT --id ID --work DIR [--sign-key FPR --key-asc KEY.ASC]
+#                          [--parent ID] [--source-info KEY=VALUE]...
+# The image's own `smartroom-release build-release --source-path` writes OUT
+# (manifest.json, root.btrfs.zst, m1n1/boot.bin, the UKI): it runs the root
+# invariant (check-root) on the root it sends and writes nothing when it fails.
+# The manifest is signed after that, as the user who ran sudo (the key stays in
+# that user's keyring), and checked against KEY.ASC. The stream is checked again.
+# Studio releases are only made this way (build-image, release-check, desk-check,
+# release-pack); never by patching an older release root.
+set -euo pipefail
+zip=${1:?Usage: see the header}
+out=${2:?Usage: see the header}
+shift 2
+id="" work="" key="" asc="" parent=""
+info=()
+while (($#)); do
+  case $1 in
+    --id) id=$2 ;; --work) work=$2 ;; --sign-key) key=$2 ;; --key-asc) asc=$2 ;; --parent) parent=$2 ;;
+    --source-info) info+=(--source-info "$2") ;;
+    *) echo "unknown option $1" >&2; exit 64 ;;
+  esac
+  shift 2
+done
+[[ -n $id && -n $work ]] || { echo "--id and --work are required" >&2; exit 64; }
+[[ -z $key || -f $asc ]] || { echo "--sign-key needs --key-asc (the public key to check the signature)" >&2; exit 64; }
+[[ $work != /tmp && $work != /tmp/* ]] || { echo "--work must not be in /tmp (root.img is several GB)" >&2; exit 64; }
+(( EUID == 0 )) || { echo "run as root (loop mount, build-release)" >&2; exit 1; }
+[[ ! -e $out ]] || { echo "$out exists" >&2; exit 1; }
+mkdir -p "$work"
+top=$work/top
+cleanup() { umount "$top" 2>/dev/null || true; }
+trap cleanup EXIT
+rm -rf "$work/x"
+mkdir -p "$work/x" "$top"
+bsdtar -xf "$zip" -C "$work/x" root.img esp/m1n1/boot.bin esp/EFI/Linux/omarchy_linux-aurora.efi
+mount -o loop,subvolid=5 "$work/x/root.img" "$top"
+tool=$top/@/usr/bin/smartroom-release
+[[ -f $tool ]] || { echo "the image has no /usr/bin/smartroom-release" >&2; exit 1; }
+args=(build-release --id "$id" --out "$out" --source-path "$top/@" --line studio
+      --uki-from "$work/x/esp/EFI/Linux/omarchy_linux-aurora.efi" --boot-from "$work/x/esp/m1n1/boot.bin"
+      "${info[@]}")
+[[ -z $parent ]] || args+=(--parent "$parent")
+python3 -I "$tool" "${args[@]}"
+python3 -I "$tool" check-root "$out/root.btrfs.zst"
+umount "$top"
+if [[ -n ${SUDO_USER:-} ]]; then
+  chown -R "$SUDO_USER:" "$out"
+fi
+if [[ -n $key ]]; then
+  signer=(runuser -u "${SUDO_USER:-root}" --)
+  "${signer[@]}" gpg --batch --yes --armor --detach-sign --local-user "$key" -o "$out/manifest.json.sig" "$out/manifest.json"
+  check=$(mktemp -d)
+  gpg --homedir "$check" --batch --quiet --import "$asc" 2>/dev/null
+  gpg --homedir "$check" --batch --status-fd 1 --verify "$out/manifest.json.sig" "$out/manifest.json" 2>/dev/null |
+    awk -v key="$key" '$2 == "VALIDSIG" && ($3 == key || $NF == key) { ok = 1 } END { exit !ok }' ||
+    { rm -rf "$check"; echo "manifest.json is not signed by $key" >&2; exit 1; }
+  rm -rf "$check"
+fi
+python3 -I - "$out" <<'PY'
+import hashlib, json, sys, pathlib
+out = pathlib.Path(sys.argv[1])
+m = json.loads((out / "manifest.json").read_text())
+for item in [m["root"]] + m["boot"]:
+    path = out / item.get("file", item.get("path"))
+    h = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    digest = h.hexdigest()
+    assert digest == item["sha256"] and path.stat().st_size == item["size"], path
+print(f"release {m['id']}: line {m['line']}, root {m['root']['sha256'][:16]}, source {m.get('source', {})}")
+PY
+rm -rf "$work/x"

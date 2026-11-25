@@ -90,23 +90,32 @@ cmdline=$(sed -n 's/^ *cmdline: //p' "$m/boot/efi/limine.conf" | head -n 1)
 echo "Limine cmdline: $cmdline"
 echo "Limine entries: $(grep -E '^/' "$m/boot/efi/limine.conf" | paste -sd' ' -)"
 echo "Limine timeout: $(sed -n 's/^timeout: //p' "$m/boot/efi/limine.conf")"
-# Every file under /etc, /usr and /opt is root's, unless smartroom/room/owner-allow
-# says otherwise: a file the build user left behind belongs to uid 1000, the
-# room's own user (sudo then ignores a sudoers file, and the kiosk user could
-# rewrite root's units). System groups of packages (polkitd, tty, dbus) pass.
-allow=$(dirname -- "${BASH_SOURCE[0]}")/room/owner-allow
-owners=$(cd "$m" && find etc usr opt -xdev \( ! -uid 0 -o -gid +999 \) -printf '%p %U:%G\n' 2>/dev/null |
-  while read -r path owner; do
-    awk -v p="$path" -v o="$owner" '$1 == p && $2 == o { found = 1 } END { exit !found }' "$allow" 2>/dev/null ||
-      echo "/$path $owner"
-  done)
-if [[ -z $owners ]]; then
-  pass "every file under /etc, /usr, /opt is root's (or in room/owner-allow)"
+# The programs the room runs find their shared libraries. A prebuilt package (the room
+# browser) names the sonames it was built against; the channel can move past them
+# (2026-11-24: chromium-smartroom wanted libsimdutf.so.36, the channel had .so.37).
+unresolved=$(chroot "$m" env -i PATH=/usr/bin /usr/bin/bash -c '
+  for f in /usr/lib/chromium/* /usr/bin/chromium /usr/bin/Hyprland /usr/bin/hyprctl /usr/bin/greetd \
+           /usr/bin/wf-recorder /usr/bin/ffmpeg /usr/bin/cloudflared /usr/bin/python3 /usr/bin/pipewire \
+           /usr/bin/wireplumber /usr/bin/sshd /usr/bin/NetworkManager /usr/bin/sudo /usr/bin/systemctl; do
+    [[ -f $f && ! -L $f ]] || continue
+    [[ $f != /usr/lib/chromium/lib*_shim.so ]] || continue   # Qt/GTK UI shims: loaded only if that toolkit is there
+    ldd "$f" 2>/dev/null | sed -n "s|^[[:space:]]*\([^[:space:]]*\) => not found|$f: \1|p"
+  done' 2>&1)
+if [[ -z $unresolved ]]; then
+  pass "the room browser and the programs the room runs find their shared libraries"
 else
-  failed "files under /etc, /usr, /opt owned by a non-root user or group ($(wc -l <<<"$owners")):"
-  sed 's/^/  /' <<<"$owners" | head -n 40
+  failed "programs whose shared libraries are missing:"
+  while IFS= read -r line; do printf '  %s\n' "$line"; done <<<"$unresolved" | head -n 40
 fi
-check "sudoers and sudoers.d parse, with the owner and mode sudo requires" chroot "$m" visudo -c -q
+# The root invariant: the image's own smartroom-release check-root, the one rule
+# that build-release, the room's trial and its integrity check also run (owners,
+# /, /etc, /usr, sudoers, visudo -c). Its exceptions are in that code, with reasons.
+if inv=$(chroot "$m" env -i PATH=/usr/bin:/usr/sbin python3 -I /usr/bin/smartroom-release check-root / 2>&1); then
+  pass "root invariant: ${inv%%$'\n'*}"
+else
+  failed "root invariant (smartroom-release check-root):"
+  while IFS= read -r line; do printf '  %s\n' "$line"; done <<<"$inv" | head -n 40
+fi
 if [[ -e $m/etc/omarchy-mac-boot/headless ]]; then
   echo "== SmartRoom image"
   # This branch is the edge image. The enrolled first stage is the payload's
