@@ -14,8 +14,8 @@ grep -q 'SMARTROOM_SNAPSHOT_HELPER=/usr/bin/smartroom-release' "$here/room/setup
   || fail "setup-run must point the Room Controller at smartroom-release"
 # The pin is written before the studio setup, whose product contract requires it.
 pin=$(grep -n 'SMARTROOM_SNAPSHOT_HELPER=/usr/bin/smartroom-release' "$here/room/setup-run" | head -n1 | cut -d: -f1)
-run=$(grep -n 'bin/smartroomos-studio-setup"$' "$here/room/setup-run" | tail -n1 | cut -d: -f1)
-((pin < run)) || fail "the helper pin must be written before smartroomos-studio-setup runs"
+run=$(grep -n 'bin/smartroom-studio-setup"$' "$here/room/setup-run" | tail -n1 | cut -d: -f1)
+((pin < run)) || fail "the helper pin must be written before smartroom-studio-setup runs"
 for want in 'smartroom-release installed' 'Room Controller helper is smartroom-release' 'Mini snapshot/update tool absent' \
             'smartroom-release trusts the release key'; do
   grep -q "$want" "$here/desk-check" || fail "desk-check must assert: $want"
@@ -36,12 +36,12 @@ excluded() {
   done <"$here/room/overlay-exclude"
   return $verdict
 }
-for dead in usr/local/sbin/smartroomos-snapshot usr/local/bin/smartroomos-snapshot usr/local/lib/smartroomos/snapshot-lib.sh \
-            usr/local/sbin/smartroomos-boot-try usr/local/sbin/smartroomos-boot-commit usr/local/sbin/smartroomos-update \
+for dead in usr/local/sbin/smartroom-snapshot usr/local/bin/smartroom-snapshot usr/local/lib/smartroom/snapshot-lib.sh \
+            usr/local/sbin/smartroom-boot-try usr/local/sbin/smartroom-boot-commit usr/local/sbin/smartroom-update \
             etc/systemd/system/smartroom-agent.service.d/snapshot-helper.conf; do
   excluded "$dead" || fail "overlay-exclude must drop $dead"
 done
-for keep in usr/local/sbin/smartroomos-first-connect usr/local/sbin/smartroomos-emergency usr/local/lib/smartroomos/install-lib.sh \
+for keep in usr/local/sbin/smartroom-first-connect usr/local/sbin/smartroom-emergency usr/local/lib/smartroom/install-lib.sh \
             etc/systemd/system/smartroom-agent.service.d/serial-uucp.conf etc/sudoers.d/smartroomcontroller; do
   ! excluded "$keep" || fail "overlay-exclude must keep $keep"
 done

@@ -1478,7 +1478,7 @@ EOF
   chmod 0644 "$target/etc/limine-entry-tool.d/zz-smartroom-firmware.conf"
   # The words that turn a kernel failure into a reboot, and make systemd arm
   # the watchdog in the initramfs too (SmartRoom Firmware docs/boot-integrity-rollback.md,
-  # smartroomos_boot_safety_cmdline). The UKI line is derived from this file;
+  # smartroom_boot_safety_cmdline). The UKI line is derived from this file;
   # grub-console.sh rewrites GRUB_CMDLINE_LINUX and leaves this line alone.
   local grub=$target/etc/default/grub
   [[ -f $grub ]] || fail "the image has no /etc/default/grub to carry the boot safety words"
@@ -1497,7 +1497,7 @@ add_safety_words() {
   done
 }
 
-# Same list as smartroomos_boot_safety_cmdline in the firmware's install-lib.sh
+# Same list as smartroom_boot_safety_cmdline in the firmware's install-lib.sh
 # (smartroom/test/zero-touch-boot-test.sh compares the two when a firmware
 # checkout is at hand).
 SMARTROOM_SAFETY_CMDLINE='panic=10 oops=panic softlockup_panic=1 systemd.watchdog_sec=30 fsck.repair=preen'
@@ -1569,8 +1569,8 @@ build_release_repository() {
   sign_release "$dir" smartroom-release.db PACKAGES RELEASE
   install -m 0644 "$dir/smartroom-release.db" "$target/var/lib/pacman/sync/smartroom-release.db"
   install -m 0644 "$dir/smartroom-release.db.sig" "$target/var/lib/pacman/sync/smartroom-release.db.sig"
-  install -d -m 0755 "$target/usr/share/smartroomos/release"
-  install -m 0644 "$dir"/{PACKAGES,PACKAGES.sig,RELEASE,RELEASE.sig} "$target/usr/share/smartroomos/release/"
+  install -d -m 0755 "$target/usr/share/smartroom/release"
+  install -m 0644 "$dir"/{PACKAGES,PACKAGES.sig,RELEASE,RELEASE.sig} "$target/usr/share/smartroom/release/"
 }
 
 # The image ships no pacman keyring; each Mac's first boot populates it from

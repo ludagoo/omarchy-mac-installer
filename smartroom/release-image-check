@@ -18,7 +18,7 @@ check() { local what=$1; shift; if "$@" >/dev/null 2>&1; then pass "$what"; else
 home=$(mktemp -d)
 trap 'rm -rf "$home"' EXIT
 keyrings=$root/usr/share/pacman/keyrings conf=$root/etc/pacman.conf mirror=$root/etc/pacman.d/smartroom-release
-release=$root/usr/share/smartroomos/release sync=$root/var/lib/pacman/sync
+release=$root/usr/share/smartroom/release sync=$root/var/lib/pacman/sync
 
 key=$(gpg --homedir "$home" --batch --show-keys --with-colons "$keyrings/smartroom.gpg" 2>/dev/null |
   awk -F: '$1 == "fpr" { print $10; exit }')

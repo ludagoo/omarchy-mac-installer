@@ -102,13 +102,13 @@ class ReleaseRepo(unittest.TestCase):
             self.assertIn('without a trusted signature', result.stderr)
 
     def test_mirror_is_the_firmware_format(self):
-        # ludagoo/smartroomcontrollerfirmware release-lib.sh smartroomos_release_mirror
-        # writes, and smartroomos-release reads, exactly these lines.
+        # ludagoo/smartroomcontrollerfirmware release-lib.sh smartroom_release_mirror
+        # writes, and smartroom-release-repo reads, exactly these lines.
         self.assertEqual(run('mirror', '2026.11.20-studio-edge',
                              'https://smartroom.goossen.dev/releases/2026.11.20-studio-edge').stdout,
                          '# SmartRoom release 2026.11.20-studio-edge. This room takes packages only from this signed\n'
                          '# repository; it moves to another release only through\n'
-                         '# smartroomos-release switch <version>.\n'
+                         '# smartroom-release-repo switch <version>.\n'
                          '# release=2026.11.20-studio-edge\n'
                          'Server = https://smartroom.goossen.dev/releases/2026.11.20-studio-edge\n')
 

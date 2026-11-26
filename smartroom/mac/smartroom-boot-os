@@ -103,7 +103,7 @@ intel_main() {
         mounted_esp=$pid
       fi
       if { [ -s "$mp/EFI/BOOT/BOOTX64.EFI" ] || [ -s "$mp/EFI/limine/limine_x64.efi" ]; } &&
-         { [ -s "$mp/limine.conf" ] || [ -d "$mp/smartroomos" ] || [ -s "$mp/EFI/Linux/smartroomos_linux-t2.efi" ]; }; then
+         { [ -s "$mp/limine.conf" ] || [ -d "$mp/smartroom" ] || [ -s "$mp/EFI/Linux/smartroomos_linux-t2.efi" ]; }; then
         [ -z "$fw_esp" ] || die "more than one SmartRoom Firmware ESP ($fw_esp, $pid)"
         fw_esp=$pid
         fw_uuid=$puuid

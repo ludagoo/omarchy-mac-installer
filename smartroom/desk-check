@@ -131,8 +131,8 @@ if [[ -e $m/etc/omarchy-mac-boot/headless ]]; then
     python3 "$aura_check" stage2 "$work/x/esp/m1n1/boot.bin"
   echo "kernel commit: $(cat "$m/usr/share/doc/linux-aurora/smartroom-kernel-commit" 2>/dev/null)"
   echo "aura commit: $(jq -r .source_commit "$m/usr/share/doc/aura/build-qualification.json" 2>/dev/null)"
-  echo "build-info: $(paste -sd' ' "$m/usr/share/smartroomos/build-info" 2>/dev/null)"
-  check "build-info names the aura boot chain" grep -q '^bootloader=aura ' "$m/usr/share/smartroomos/build-info"
+  echo "build-info: $(paste -sd' ' "$m/usr/share/smartroom/build-info" 2>/dev/null)"
+  check "build-info names the aura boot chain" grep -q '^bootloader=aura ' "$m/usr/share/smartroom/build-info"
   check "kernel commit recorded in /usr/share/doc/linux-aurora/smartroom-kernel-commit" \
     grep -Eqx '[0-9a-f]{40}' "$m/usr/share/doc/linux-aurora/smartroom-kernel-commit"
   # With the encoders' auxiliary DMA blocks enabled, apple-ave-dma keeps the
@@ -188,13 +188,13 @@ sys.exit(open(sys.argv[2], "rb").read() not in open(sys.argv[1], "rb").read())' 
   else
     failed "Mesa opens the kernel's GPU driver: $out"
   fi
-  hypr=$m/usr/share/smartroomos/hypr
-  check "cursor invisible in hyprland.conf (usr/share/smartroomos/hypr)" awk '
+  hypr=$m/usr/share/smartroom/hypr
+  check "cursor invisible in hyprland.conf (usr/share/smartroom/hypr)" awk '
     /^[[:space:]]*cursor[[:space:]]*\{/ { s = 1; next }
     s && /^[[:space:]]*\}/ { s = 0 }
     s && /^[[:space:]]*invisible[[:space:]]*=[[:space:]]*true[[:space:]]*$/ { found = 1 }
     END { exit !found }' "$hypr/hyprland.conf"
-  check "cursor invisible in hyprland.lua (usr/share/smartroomos/hypr)" \
+  check "cursor invisible in hyprland.lua (usr/share/smartroom/hypr)" \
     grep -Eq '^[[:space:]]*cursor[[:space:]]*=[[:space:]]*\{[^}]*invisible[[:space:]]*=[[:space:]]*true' "$hypr/hyprland.lua"
   # No local shell or root from a classroom keyboard; see the script's header.
   lockdown=$(bash "$(dirname -- "${BASH_SOURCE[0]}")/room-lockdown-check" "$m" 2>&1)
@@ -244,12 +244,12 @@ sys.exit(open(sys.argv[2], "rb").read() not in open(sys.argv[1], "rb").read())' 
       bash -c 'printf "%s\n" "$1" | grep -Fq -- " $2"' _ " $cmdline" "$word"
   done
   check "systemd watchdog drop-in (RuntimeWatchdogSec, CrashAction=reboot)" \
-    bash -c 'grep -q "^RuntimeWatchdogSec=" "$1" && grep -qx "CrashAction=reboot" "$1"' _ "$m/etc/systemd/system.conf.d/smartroomos-watchdog.conf"
-  check "panic/oops/hung-task sysctls" grep -q 'kernel.hung_task_panic' "$m/etc/sysctl.d/10-smartroomos-panic.conf"
+    bash -c 'grep -q "^RuntimeWatchdogSec=" "$1" && grep -qx "CrashAction=reboot" "$1"' _ "$m/etc/systemd/system.conf.d/smartroom-watchdog.conf"
+  check "panic/oops/hung-task sysctls" grep -q 'kernel.hung_task_panic' "$m/etc/sysctl.d/10-smartroom-panic.conf"
   check "initramfs safety hook installed and in the mkinitcpio hooks" \
-    bash -c 'test -f "$1/usr/lib/initcpio/install/smartroomos-safety" && test -f "$1/usr/lib/initcpio/hooks/smartroomos-safety" && grep -q smartroomos-safety "$1/etc/mkinitcpio.conf.d/zz-smartroomos-safety.conf"' _ "$m"
+    bash -c 'test -f "$1/usr/lib/initcpio/install/smartroom-safety" && test -f "$1/usr/lib/initcpio/hooks/smartroom-safety" && grep -q smartroom-safety "$1/etc/mkinitcpio.conf.d/zz-smartroom-safety.conf"' _ "$m"
   check "integrity check on boot, periodic timer and rollback command" \
-    bash -c 'test -L "$1/multi-user.target.wants/smartroomos-integrity.service" && test -L "$1/timers.target.wants/smartroomos-integrity-periodic.timer" && test -L "$1/timers.target.wants/smartroom-rollback-mark-good.timer" && test -x "$2/usr/local/sbin/smartroom-rollback"' _ "$m/etc/systemd/system" "$m"
+    bash -c 'test -L "$1/multi-user.target.wants/smartroom-integrity.service" && test -L "$1/timers.target.wants/smartroom-integrity-periodic.timer" && test -L "$1/timers.target.wants/smartroom-rollback-mark-good.timer" && test -x "$2/usr/local/sbin/smartroom-rollback"' _ "$m/etc/systemd/system" "$m"
   meta=$(dirname -- "$zip")/installer_data.json
   if [[ -f $meta ]]; then
     check "picker and stub name: installer_data.json says SmartRoom Firmware" \
@@ -268,19 +268,19 @@ sys.exit(open(sys.argv[2], "rb").read() not in open(sys.argv[1], "rb").read())' 
   fi
   check "ESP install.conf: encrypt=0" grep -qx 'encrypt=0' "$m/boot/efi/omarchy/install.conf"
   check "sshd enabled" test -L "$wants/sshd.service"
-  check "SmartRoom first boot enabled" test -L "$wants/smartroomos-firstboot.service"
-  check "SmartRoom first boot runs after Omarchy's" grep -q 'After=omarchy-mac-first-boot.service' "$m/etc/systemd/system/smartroomos-firstboot.service.d/10-after-omarchy-first-boot.conf"
+  check "SmartRoom first boot enabled" test -L "$wants/smartroom-firstboot.service"
+  check "SmartRoom first boot runs after Omarchy's" grep -q 'After=omarchy-mac-first-boot.service' "$m/etc/systemd/system/smartroom-firstboot.service.d/10-after-omarchy-first-boot.conf"
   check "omarchy-mac-first-boot enabled" test -L "$wants/omarchy-mac-first-boot.service"
   check "timezone America/Chicago" test "$(readlink "$m/etc/localtime" | sed 's|^\.\./|/|')" = /usr/share/zoneinfo/America/Chicago
-  check "snapshots left to Omarchy" test -e "$m/etc/smartroomos/omarchy-base"
+  check "snapshots left to Omarchy" test -e "$m/etc/smartroom/omarchy-base"
   # Updates and rollback: smartroom-release (aura-try), not the Mini's snapshot tools.
   check "smartroom-release installed" test -x "$m/usr/bin/smartroom-release"
   check "smartroom-release health service enabled at sysinit" test -L "$m/usr/lib/systemd/system/sysinit.target.wants/smartroom-release-health.service" -o -L "$m/etc/systemd/system/sysinit.target.wants/smartroom-release-health.service"
-  check "smartroom-release trusts the release key" test -s "$m/usr/share/smartroomos/release-keyring.gpg"
-  check "smartroom-release carries the room's identity" grep -qx '/var/lib/smartroomos' "$m/usr/share/smartroomos/release-carry.list"
+  check "smartroom-release trusts the release key" test -s "$m/usr/share/smartroom/release-keyring.gpg"
+  check "smartroom-release carries the room's identity" grep -qx '/var/lib/smartroom' "$m/usr/share/smartroom/release-carry.list"
   check "Room Controller helper is smartroom-release" grep -qx 'Environment=SMARTROOM_SNAPSHOT_HELPER=/usr/bin/smartroom-release' "$m/etc/systemd/system/smartroom-agent.service.d/snapshot-helper.conf"
-  for f in usr/local/sbin/smartroomos-snapshot usr/local/bin/smartroomos-snapshot usr/local/sbin/smartroomos-boot-try \
-           usr/local/sbin/smartroomos-boot-commit usr/local/sbin/smartroomos-update usr/local/lib/smartroomos/snapshot-lib.sh; do
+  for f in usr/local/sbin/smartroom-snapshot usr/local/bin/smartroom-snapshot usr/local/sbin/smartroom-boot-try \
+           usr/local/sbin/smartroom-boot-commit usr/local/sbin/smartroom-update usr/local/lib/smartroom/snapshot-lib.sh; do
     check "Mini snapshot/update tool absent: $f" bash -c '[[ ! -e $1 && ! -L $1 ]]' _ "$m/$f"
   done
   check "no owner provisioning armed" test ! -e "$m/var/lib/omarchy/provisioning/pending"
@@ -290,8 +290,8 @@ sys.exit(open(sys.argv[2], "rb").read() not in open(sys.argv[1], "rb").read())' 
   mkdir -p "$hosts_dest/etc"
   cp "$m/etc/hosts" "$hosts_dest/etc/hosts"
   check "adoption leaves /etc/hosts world-readable" bash -c \
-    'source "$1/usr/local/lib/smartroomos/install-lib.sh" &&
-     SMARTROOMOS_DRY_RUN=1 SMARTROOMOS_AGENT_CONFIG=/nonexistent smartroomos_apply_hostname deskcheck "$2" &&
+    'source "$1/usr/local/lib/smartroom/install-lib.sh" &&
+     SMARTROOM_DRY_RUN=1 SMARTROOM_AGENT_CONFIG=/nonexistent smartroom_apply_hostname deskcheck "$2" &&
      grep -q "deskcheck" "$2/etc/hosts" && test "$(stat -c %a "$2/etc/hosts")" = 644' _ "$m" "$hosts_dest"
   rm -rf "$hosts_dest"
   for pkg in omarchy omarchy-settings omarchy-mac sddm plymouth quickshell uwsm; do
@@ -302,7 +302,7 @@ sys.exit(open(sys.argv[2], "rb").read() not in open(sys.argv[1], "rb").read())' 
   printf '%s\n' "$out"
   fails=$((fails + $(grep -c '^FAIL' <<<"$out") + (rc != 0 && $(grep -c '^FAIL' <<<"$out") == 0)))
   check "no display manager" test ! -e "$m/etc/systemd/system/display-manager.service" -o "$(readlink "$m/etc/systemd/system/display-manager.service")" = /usr/lib/systemd/system/greetd.service
-  for f in etc/limine-entry-tool.d/smartroomos.conf etc/initcpio/install/asahi; do
+  for f in etc/limine-entry-tool.d/smartroom.conf etc/initcpio/install/asahi; do
     check "old boot change absent: $f" test ! -e "$m/$f"
   done
 else
