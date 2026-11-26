@@ -1500,7 +1500,7 @@ add_safety_words() {
 # Same list as smartroomos_boot_safety_cmdline in the firmware's install-lib.sh
 # (smartroom/test/zero-touch-boot-test.sh compares the two when a firmware
 # checkout is at hand).
-SMARTROOM_SAFETY_CMDLINE='panic=10 oops=panic softlockup_panic=1 systemd.watchdog_sec=30'
+SMARTROOM_SAFETY_CMDLINE='panic=10 oops=panic softlockup_panic=1 systemd.watchdog_sec=30 fsck.repair=preen'
 
 # $1 /etc/default/grub  $2 one word. True when GRUB_CMDLINE_LINUX_DEFAULT has it.
 grub_default_has_word() {

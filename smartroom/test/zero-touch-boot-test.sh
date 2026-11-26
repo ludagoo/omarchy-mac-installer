@@ -188,11 +188,11 @@ mkdir -p "$test_tmp/target/boot/efi" "$test_tmp/target/etc/default"
 printf 'GRUB_CMDLINE_LINUX_DEFAULT="quiet splash panic=10"\n' >"$test_tmp/target/etc/default/grub"
 sandbox 'add_safety_words "$target/etc/default/grub"; add_safety_words "$target/etc/default/grub"' || fail "add_safety_words"
 line=$(cat "$test_tmp/target/etc/default/grub")
-[[ $line == 'GRUB_CMDLINE_LINUX_DEFAULT="quiet splash panic=10 oops=panic softlockup_panic=1 systemd.watchdog_sec=30"' ]] ||
+[[ $line == 'GRUB_CMDLINE_LINUX_DEFAULT="quiet splash panic=10 oops=panic softlockup_panic=1 systemd.watchdog_sec=30 fsck.repair=preen"' ]] ||
   fail "safety words appended once and panic=10 kept: $line"
 printf 'GRUB_CMDLINE_LINUX_DEFAULT="quiet systemd.watchdog_sec=300"\n' >"$test_tmp/target/etc/default/grub"
 sandbox 'add_safety_words "$target/etc/default/grub"' || fail "add_safety_words on a different value"
-grep -Eq ' systemd.watchdog_sec=30"$' "$test_tmp/target/etc/default/grub" || fail "word match is exact, not a prefix"
+grep -Eq ' systemd.watchdog_sec=30 fsck.repair=preen"$' "$test_tmp/target/etc/default/grub" || fail "word match is exact, not a prefix"
 # Menu timeouts: Omarchy's 1, the leaf's 3, none at all -> 0, with one timeout line.
 for start in 'timeout: 1' 'timeout: 3' 'timeout: 10' ''; do
   printf '%s\nquiet: yes\n/+SmartRoom Firmware\n  path: boot():/EFI/Linux/omarchy_linux-aurora.efi\n' "$start" >"$test_tmp/target/boot/efi/limine.conf"
