@@ -1,6 +1,7 @@
 #!/bin/bash
 # Reboot the test Studio into Linux ONCE (macOS stays the persistent default), and wait for SSH.
-# Run from the Mini, holding the Studio lock. Follows ~/smartroom-supervisor/work/safety-section.md.
+# Run from the Mini, holding the Studio lock. Follows the Studio safety rules: macOS stays the default,
+# every Linux boot is one-shot, and a hold file stops it.
 #   studio-oneshot-reboot [wait-seconds]          (default 600)
 #   STUDIO_CRASH=1 studio-oneshot-reboot          crash the kernel instead of a clean reboot
 #                                                 (sysrq c; panic=10 reboots it; needs panic=10 on the command line)
