@@ -232,7 +232,7 @@ with zipfile.ZipFile(zpath, "w") as z:
             z.write(p, p.relative_to(stage).as_posix())
 idata = {
     "os_list": [{
-        "default_os_name": "SmartRoomOS",
+        "default_os_name": "SmartRoom Firmware",
         "omarchy_target": "intel-mini-full-os",
         "package": "smartroomcontrollerfirmware-mini-x86_64.zip",
         "boot_object": "EFI/BOOT/BOOTX64.EFI",
