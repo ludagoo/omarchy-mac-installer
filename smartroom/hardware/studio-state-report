@@ -1,6 +1,6 @@
 #!/bin/bash
 # Read-only state report of a Studio room after a boot: kernel, panic=10, units, network, Hyprland,
-# the Room Controller (agent), monitors, power-on policy, watchdog. Run it on the Studio, as root.
+# the Room Controller, monitors, power-on policy, watchdog. Run it on the Studio, as root.
 #   UPS=<seconds of uptime, for the coredump window> studio-state-report
 echo "== $(date -Is) boot $(cat /proc/sys/kernel/random/boot_id | cut -c1-8) uptime $(cut -d' ' -f1 /proc/uptime)s kernel $(uname -r)"
 echo "cmdline: $(cat /proc/cmdline)"
@@ -13,9 +13,9 @@ echo "end0 link carrier: $(cat /sys/class/net/end0/carrier 2>&1)  $(ip -br a sho
 echo "Hyprland: $(pgrep -a Hyprland | head -1 | cut -c1-80) started $(ps -o lstart= -p $(pgrep -o Hyprland) 2>/dev/null)"
 echo "greetd: $(systemctl is-active greetd) NRestarts=$(systemctl show greetd -p NRestarts --value)"
 echo "coredumps this boot: $(coredumpctl list --since "$(date -d @$(( $(date +%s) - ${UPS:-0} )) '+%F %T')" --no-legend 2>/dev/null | wc -l)"
-echo "agent: $(systemctl is-active smartroom-agent)"
-echo "agent register failures this boot: $(journalctl -b -u smartroom-agent --no-pager | grep -c 'room register failed')"
-echo "agent established connections: $(ss -tnp 2>/dev/null | grep -c 'ESTAB.*python')"
+echo "Room Controller: $(systemctl is-active smartroom-agent)"
+echo "Room Controller register failures this boot: $(journalctl -b -u smartroom-agent --no-pager | grep -c 'room register failed')"
+echo "Room Controller established connections: $(ss -tnp 2>/dev/null | grep -c 'ESTAB.*python')"
 journalctl -b -u smartroom-agent --no-pager | grep 'published display inventory' | tail -1 | cut -c1-160
 echo "monitors (Hyprland):"; sudo -u smartroomcontroller env XDG_RUNTIME_DIR=/run/user/$(id -u smartroomcontroller) HYPRLAND_INSTANCE_SIGNATURE=$(ls -t /run/user/$(id -u smartroomcontroller)/hypr 2>/dev/null | head -1) hyprctl monitors 2>&1 | grep -E "^Monitor|^\s*[0-9]+x[0-9]+" | head -8
 echo "DRM connectors: $(for c in /sys/class/drm/card*-*/status; do printf '%s=%s ' "$(basename $(dirname $c))" "$(cat $c)"; done)"
