@@ -1,0 +1,5 @@
+# kind, pattern, reason. A hit is allowed when the path or the line matches.
+path	(^|/)ai_attribution_lint\.py$	the scanner names the patterns it looks for
+path	(^|/)ai-attribution-allow\.txt$	this list
+root	smartroom	our tree; upstream Omarchy stays out of this lint
+root	CARRY.md	our carry notes

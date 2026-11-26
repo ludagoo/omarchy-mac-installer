@@ -293,6 +293,7 @@ fork's own `smartroom-ci.yml` waits for the enable procedure above.
 
 ## Rules
 
-- Commit as the maintainer. No `Assisted-by` trailer and no
-  `Signed-off-by`. Upstream PRs go to omacom only (never AsahiLinux), and only
-  as drafts the maintainer reviews and sends.
+- Commit as the maintainer, with no co-author or assistant trailers and no
+  `Signed-off-by` (`smartroom/test/ai_attribution_lint.py` checks the tree).
+  Upstream PRs go to omacom only (never AsahiLinux), and only as drafts the
+  maintainer reviews and sends.
