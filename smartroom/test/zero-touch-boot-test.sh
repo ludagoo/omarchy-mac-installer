@@ -208,8 +208,8 @@ unset_at=$(grep -n '^  verify_uki_cmdline$' "$builder" | head -n 1 | cut -d: -f1
 [[ -n $act_at && -n $unset_at ]] && (( act_at < unset_at )) || fail "force_zero_wait is not called right after the activation"
 # The word list is the firmware's (docs/boot-integrity-rollback.md), when its checkout is here.
 fw=${SMARTROOM_FIRMWARE:-$(cd -- "$installer/../smartroomcontrollerfirmware" 2>/dev/null && pwd || true)}
-if [[ -n $fw && -f $fw/overlay/usr/local/lib/smartroomos/install-lib.sh ]]; then
-  want=$(bash -c 'source "$1"; smartroomos_boot_safety_cmdline' _ "$fw/overlay/usr/local/lib/smartroomos/install-lib.sh")
+if [[ -n $fw && -f $fw/overlay/usr/local/lib/smartroom/install-lib.sh ]]; then
+  want=$(bash -c 'source "$1"; smartroom_boot_safety_cmdline' _ "$fw/overlay/usr/local/lib/smartroom/install-lib.sh")
   have=$(sed -n "s/^SMARTROOM_SAFETY_CMDLINE='\(.*\)'\$/\1/p" "$builder")
   [[ $want == "$have" ]] || fail "the builder's safety words differ from the firmware's: '$have' vs '$want'"
   echo "ok - the builder's safety words equal the firmware's"

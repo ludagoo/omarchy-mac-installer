@@ -11,25 +11,25 @@ etc/mkinitcpio.conf
 etc/mkinitcpio.conf.d/*
 etc/limine-entry-tool.d/*
 usr/lib/omarchy/initcpio/*
-usr/lib/systemd/system/smartroomos-initrd-swap.service
-usr/local/lib/smartroomos/initrd-swap-fix
-etc/sysctl.d/10-smartroomos-panic.conf
-etc/modprobe.d/smartroomos-boot-safety.conf
-etc/modules-load.d/smartroomos-boot-safety.conf
-etc/systemd/system.conf.d/smartroomos-watchdog.conf
+usr/lib/systemd/system/smartroom-initrd-swap.service
+usr/local/lib/smartroom/initrd-swap-fix
+etc/sysctl.d/10-smartroom-panic.conf
+etc/modprobe.d/smartroom-boot-safety.conf
+etc/modules-load.d/smartroom-boot-safety.conf
+etc/systemd/system.conf.d/smartroom-watchdog.conf
 # Snapshots, boot counting and EFI variables: Omarchy's (@factory, snapper,
 # limine-snapper-sync, omarchy-mac-efi-vars).
 etc/limine-snapper-sync.conf
 etc/snap-pac.ini
 etc/snapper/config-templates/*
-etc/systemd/system/boot-complete.target.requires/smartroomos-boot-commit.service
-etc/systemd/system/multi-user.target.wants/smartroomos-boot-commit.service
-etc/systemd/system/smartroomos-boot-commit.service
-etc/systemd/system/multi-user.target.wants/smartroomos-snapshot-recover.service
-usr/lib/systemd/system/smartroomos-snapshot-recover.service
-etc/systemd/system/shutdown.target.wants/smartroomos-efi-vars.service
-usr/lib/systemd/system/smartroomos-efi-vars.service
-usr/local/sbin/smartroomos-efi-vars-save
+etc/systemd/system/boot-complete.target.requires/smartroom-boot-commit.service
+etc/systemd/system/multi-user.target.wants/smartroom-boot-commit.service
+etc/systemd/system/smartroom-boot-commit.service
+etc/systemd/system/multi-user.target.wants/smartroom-snapshot-recover.service
+usr/lib/systemd/system/smartroom-snapshot-recover.service
+etc/systemd/system/shutdown.target.wants/smartroom-efi-vars.service
+usr/lib/systemd/system/smartroom-efi-vars.service
+usr/local/sbin/smartroom-efi-vars-save
 # Packages: the image's pacman.conf and mirror list are Omarchy's stable template.
 etc/pacman.conf
 etc/pacman.d/*
@@ -37,20 +37,20 @@ etc/pacman.d/*
 # the Studio never waits at boot and reboots on every failure, like the Mini.
 # These are small, additive files, not Omarchy's boot logic: the panic/watchdog
 # sysctls, systemd's watchdog drop-in, and the mkinitcpio drop-in that appends
-# our safety hook (usr/lib/initcpio/{install,hooks}/smartroomos-safety are not
+# our safety hook (usr/lib/initcpio/{install,hooks}/smartroom-safety are not
 # excluded above; the integrity check, the rollback command and their units are
 # not either). Limine's timeout and checksums stay the image builder's.
-!etc/sysctl.d/10-smartroomos-panic.conf
-!etc/systemd/system.conf.d/smartroomos-watchdog.conf
-!etc/mkinitcpio.conf.d/zz-smartroomos-safety.conf
+!etc/sysctl.d/10-smartroom-panic.conf
+!etc/systemd/system.conf.d/smartroom-watchdog.conf
+!etc/mkinitcpio.conf.d/zz-smartroom-safety.conf
 # Updates and rollback on a Studio are smartroom-release (a watchdog-guarded aura-try
 # trial of a whole release). The Mini's snapshot, boot-try, boot-commit and update
 # tools and the agent's pin to them are not on this image; setup-run pins the Room
 # Controller to smartroom-release instead.
-usr/local/sbin/smartroomos-snapshot
-usr/local/bin/smartroomos-snapshot
-usr/local/lib/smartroomos/snapshot-lib.sh
-usr/local/sbin/smartroomos-boot-try
-usr/local/sbin/smartroomos-boot-commit
-usr/local/sbin/smartroomos-update
+usr/local/sbin/smartroom-snapshot
+usr/local/bin/smartroom-snapshot
+usr/local/lib/smartroom/snapshot-lib.sh
+usr/local/sbin/smartroom-boot-try
+usr/local/sbin/smartroom-boot-commit
+usr/local/sbin/smartroom-update
 etc/systemd/system/smartroom-agent.service.d/snapshot-helper.conf

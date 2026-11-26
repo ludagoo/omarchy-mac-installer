@@ -19,7 +19,7 @@ echo "Room Controller established connections: $(ss -tnp 2>/dev/null | grep -c '
 journalctl -b -u smartroom-agent --no-pager | grep 'published display inventory' | tail -1 | cut -c1-160
 echo "monitors (Hyprland):"; sudo -u smartroomcontroller env XDG_RUNTIME_DIR=/run/user/$(id -u smartroomcontroller) HYPRLAND_INSTANCE_SIGNATURE=$(ls -t /run/user/$(id -u smartroomcontroller)/hypr 2>/dev/null | head -1) hyprctl monitors 2>&1 | grep -E "^Monitor|^\s*[0-9]+x[0-9]+" | head -8
 echo "DRM connectors: $(for c in /sys/class/drm/card*-*/status; do printf '%s=%s ' "$(basename $(dirname $c))" "$(cat $c)"; done)"
-echo "ac-power: $(smartroomos-ac-power status 2>&1 | tail -1)"
-journalctl -b -u smartroomos-ac-power --no-pager | tail -2 | cut -c1-200
+echo "ac-power: $(smartroom-ac-power status 2>&1 | tail -1)"
+journalctl -b -u smartroom-ac-power --no-pager | tail -2 | cut -c1-200
 echo "wdctl: $(wdctl -x 2>&1 | head -3 | tr '\n' ' ')"
 echo "previous boot end:"; journalctl -b -1 --no-pager -n 6 2>/dev/null | cut -c1-160

@@ -3,7 +3,7 @@
 #   smartroom/ac-power-check ROOT KVER
 # ROOT is the image root (desk-check mounts it read-only), KVER its kernel.
 # Prints one PASS/FAIL line per fact; exits non-zero on any FAIL. Facts:
-#  - smartroomos-ac-power (the tool) is executable and its unit is enabled at
+#  - smartroom-ac-power (the tool) is executable and its unit is enabled at
 #    multi-user.target, so the PMU's power-on policy is set at every boot;
 #  - the unit runs on a 2023 Studio only (j475c, j475d device trees);
 #  - the kernel can set the policy: macsmc-reboot carries `ac_power_mode`
@@ -16,11 +16,11 @@ fails=0
 pass() { echo "PASS $*"; }
 failed() { echo "FAIL $*"; fails=$((fails + 1)); }
 check() { local what=$1; shift; if "$@" >/dev/null 2>&1; then pass "$what"; else failed "$what"; fi; }
-unit=$m/usr/lib/systemd/system/smartroomos-ac-power.service
-tool=$m/usr/local/sbin/smartroomos-ac-power
-check "power-on after a power cut: smartroomos-ac-power is executable" test -x "$tool"
-check "power-on after a power cut: smartroomos-ac-power.service enabled at multi-user.target" \
-  test -L "$m/etc/systemd/system/multi-user.target.wants/smartroomos-ac-power.service"
+unit=$m/usr/lib/systemd/system/smartroom-ac-power.service
+tool=$m/usr/local/sbin/smartroom-ac-power
+check "power-on after a power cut: smartroom-ac-power is executable" test -x "$tool"
+check "power-on after a power cut: smartroom-ac-power.service enabled at multi-user.target" \
+  test -L "$m/etc/systemd/system/multi-user.target.wants/smartroom-ac-power.service"
 check "power-on after a power cut: the unit runs on a 2023 Studio only (j475c, j475d)" \
   bash -c 'grep -qx "ConditionFirmware=|device-tree-compatible(apple,j475c)" "$1" && grep -qx "ConditionFirmware=|device-tree-compatible(apple,j475d)" "$1"' _ "$unit"
 check "power-on after a power cut: the unit runs every boot (multi-user.target, no ConditionFirstBoot)" \

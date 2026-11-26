@@ -248,7 +248,7 @@ PY
 PAY="$t/pkg/smartroomcontrollerfirmware-mini-x86_64.zip"
 IDATA="$t/pkg/installer_data.json"
 PSHA=$(sha256sum "$PAY" | awk '{print $1}')
-printf 'SMARTROOMOS_SERVER_URL=https://rooms.example.invalid\nSMARTROOMOS_AGENT_INSTALL_SHA256=%064d\n' 0 >"$t/fb.env"
+printf 'SMARTROOM_SERVER_URL=https://rooms.example.invalid\nSMARTROOM_AGENT_INSTALL_SHA256=%064d\n' 0 >"$t/fb.env"
 
 reset_state() {
   python3 - "$FAKE_STATE" "${1:-normal}" <<'PY'

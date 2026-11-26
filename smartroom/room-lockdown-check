@@ -15,15 +15,15 @@ pass() { echo "PASS $*"; }
 failed() { echo "FAIL $*"; fails=$((fails + 1)); }
 check() { local what=$1; shift; if "$@" >/dev/null 2>&1; then pass "$what"; else failed "$what"; fi; }
 
-# Kiosk config: /usr/share/smartroomos/hypr, never a copy in a home.
-hypr=$r/usr/share/smartroomos/hypr
-session=$r/usr/local/bin/smartroomos-session
+# Kiosk config: /usr/share/smartroom/hypr, never a copy in a home.
+hypr=$r/usr/share/smartroom/hypr
+session=$r/usr/local/bin/smartroom-session
 for f in hyprland.conf hyprland.lua; do
-  check "kiosk config owned by the image: /usr/share/smartroomos/hypr/$f" test -s "$hypr/$f"
+  check "kiosk config owned by the image: /usr/share/smartroom/hypr/$f" test -s "$hypr/$f"
   check "no kiosk $f in /home/$user (the session reads the image's)" test ! -e "$r/home/$user/.config/hypr/$f"
 done
 check "no kiosk config in /etc/skel (a one-time copy never gets updates)" test ! -e "$r/etc/skel/.config/hypr"
-check "the session starts Hyprland with /usr/share/smartroomos/hypr" grep -q 'local dir=/usr/share/smartroomos/hypr ' "$session"
+check "the session starts Hyprland with /usr/share/smartroom/hypr" grep -q 'local dir=/usr/share/smartroom/hypr ' "$session"
 check "the session creates ~/.cache (crash reports)" grep -qF 'mkdir -p "${XDG_CACHE_HOME:-$HOME/.cache}"' "$session"
 conf_binds() { grep -Eq '^[[:space:]]*(bind[a-z]*|exec(-once|r|r-once)?)[[:space:]]*=' "$1"; }
 lua_binds() { sed 's/--.*//' "$1" | grep -Eq 'hl\.bind|exec_cmd|hl\.exec'; }
@@ -60,7 +60,7 @@ check "sudoers.d/$user grants no ALL command" bash -c "$(declare -f rules); ! ru
 check "sudoers.d/$user grants no shell, editor, interpreter or pacman" bash -c "$(declare -f rules); ! rules \"\$1\" | grep -Eq '$shells'" _ "$sudoers"
 check "sudoers.d/$user grants systemctl reboot" bash -c "$(declare -f rules); rules \"\$1\" | grep -q '/usr/bin/systemctl reboot'" _ "$sudoers"
 check "sudoers.d/$user pins the snapshot helper's arguments (regex)" \
-  bash -c "$(declare -f rules); rules \"\$1\" | grep -qF '/usr/local/bin/smartroomos-snapshot ^'" _ "$sudoers"
+  bash -c "$(declare -f rules); rules \"\$1\" | grep -qF '/usr/local/bin/smartroom-snapshot ^'" _ "$sudoers"
 check "sudoers.d/$user pins smartroom-rollback status --json (regex)" \
   bash -c "$(declare -f rules); rules \"\$1\" | grep -qF '/usr/local/bin/smartroom-rollback ^status --json$' && rules \"\$1\" | grep -qF '/usr/local/sbin/smartroom-rollback ^status --json$'" _ "$sudoers"
 check "sudoers.d/$user pins smartroom-release status/list/restore (regex)" \

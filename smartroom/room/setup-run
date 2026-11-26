@@ -7,14 +7,14 @@
 #   authorized_keys   the admin public keys (never a secret; not committed)
 #   overlay-exclude   overlay files the Omarchy base owns (never installed)
 #   release-key.asc   the public key smartroom-release trusts (the package key)
-#   build-info        lines for /usr/share/smartroomos/build-info
+#   build-info        lines for /usr/share/smartroom/build-info
 # It installs our overlay minus overlay-exclude, our first boot, the DHCP
 # client id, then runs our studio setup unchanged in image mode (user, keys,
 # sshd, greetd, America/Chicago, units). Packages are already installed.
 set -euo pipefail
 here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 fw=$here/firmware
-[[ -d $fw/overlay && -x $fw/bin/smartroomos-studio-setup && -f $here/authorized_keys && -f $here/smartroom-wired.nmconnection ]] ||
+[[ -d $fw/overlay && -x $fw/bin/smartroom-studio-setup && -f $here/authorized_keys && -f $here/smartroom-wired.nmconnection ]] ||
   { echo "setup: firmware/ or authorized_keys missing" >&2; exit 1; }
 
 # overlay-exclude is read top to bottom and the last pattern that matches a
@@ -51,32 +51,32 @@ while IFS= read -r -d '' rel; do
 done < <(cd "$fw/overlay" && find . -mindepth 1 \( -type f -o -type l \) -print0)
 
 # The flag our first boot and first-connect read: snapshots are Omarchy's.
-install -d -m 0755 /etc/smartroomos
-: >/etc/smartroomos/omarchy-base
+install -d -m 0755 /etc/smartroom
+: >/etc/smartroom/omarchy-base
 # The Room Controller's update and rollback helper is smartroom-release (the Mini's
 # snapshot tool is in overlay-exclude). Written before the studio setup, whose
 # product contract requires this pin on an Omarchy-base image.
 install -d -m 0755 /etc/systemd/system/smartroom-agent.service.d
 printf '[Service]\nEnvironment=SMARTROOM_SNAPSHOT_HELPER=/usr/bin/smartroom-release\n' \
   >/etc/systemd/system/smartroom-agent.service.d/snapshot-helper.conf
-install -D -m 0755 "$fw/studio-install/firstboot.sh" /usr/local/sbin/smartroomos-firstboot
+install -D -m 0755 "$fw/studio-install/firstboot.sh" /usr/local/sbin/smartroom-firstboot
 # smartroom-release checks a release's manifest against this key (the SmartRoom
 # package key, public). Without it a room can only stage an unsigned release.
 if [[ -f $here/release-key.asc ]]; then
   gnupghome=$(mktemp -d)
-  install -d -m 0755 /usr/share/smartroomos
-  gpg --homedir "$gnupghome" --dearmor <"$here/release-key.asc" >/usr/share/smartroomos/release-keyring.gpg
-  chmod 0644 /usr/share/smartroomos/release-keyring.gpg
+  install -d -m 0755 /usr/share/smartroom
+  gpg --homedir "$gnupghome" --dearmor <"$here/release-key.asc" >/usr/share/smartroom/release-keyring.gpg
+  chmod 0644 /usr/share/smartroom/release-keyring.gpg
   rm -rf "$gnupghome"
 fi
 # Omarchy's first boot (keyring, deferred hardware setup, the boot rebuild)
 # finishes before ours starts: both make the pacman keyring, and ours ends in
 # a reboot.
-install -d -m 0755 /etc/systemd/system/smartroomos-firstboot.service.d
+install -d -m 0755 /etc/systemd/system/smartroom-firstboot.service.d
 printf '[Unit]\nAfter=omarchy-mac-first-boot.service omarchy-provision-hardware.service\n' \
-  >/etc/systemd/system/smartroomos-firstboot.service.d/10-after-omarchy-first-boot.conf
-install -D -m 0644 "$fw/builder/image/rootfs/etc/NetworkManager/conf.d/smartroomos-dhcp-client-id.conf" \
-  /etc/NetworkManager/conf.d/smartroomos-dhcp-client-id.conf
+  >/etc/systemd/system/smartroom-firstboot.service.d/10-after-omarchy-first-boot.conf
+install -D -m 0644 "$fw/builder/image/rootfs/etc/NetworkManager/conf.d/smartroom-dhcp-client-id.conf" \
+  /etc/NetworkManager/conf.d/smartroom-dhcp-client-id.conf
 # The Studio AQC113 drops replies unless its port accepts all MAC addresses
 # (omacom/omarchy-mac-pkgs#137). NetworkManager only reads 0600 root keyfiles.
 install -D -m 0600 "$here/smartroom-wired.nmconnection" \
@@ -87,19 +87,19 @@ install -D -m 0600 "$here/smartroom-wired.nmconnection" \
 scratch=$(mktemp -d)
 cp /etc/pacman.conf "$scratch/pacman.conf"
 cp /etc/pacman.d/mirrorlist "$scratch/mirrorlist"
-SMARTROOMOS_IMAGE_BUILD=1 \
-  SMARTROOMOS_OVERLAY="$overlay" \
-  SMARTROOMOS_LIB="$overlay/usr/local/lib/smartroomos/install-lib.sh" \
-  SMARTROOMOS_SNAPSHOT_LIB="$overlay/usr/local/lib/smartroomos/snapshot-lib.sh" \
-  SMARTROOMOS_AUTHORIZED_KEYS="$here/authorized_keys" \
-  SMARTROOMOS_PACMAN_CONF="$scratch/pacman.conf" \
-  SMARTROOMOS_PACMAN_MIRRORLIST="$scratch/mirrorlist" \
-  "$fw/bin/smartroomos-studio-setup"
+SMARTROOM_IMAGE_BUILD=1 \
+  SMARTROOM_OVERLAY="$overlay" \
+  SMARTROOM_LIB="$overlay/usr/local/lib/smartroom/install-lib.sh" \
+  SMARTROOM_SNAPSHOT_LIB="$overlay/usr/local/lib/smartroom/snapshot-lib.sh" \
+  SMARTROOM_AUTHORIZED_KEYS="$here/authorized_keys" \
+  SMARTROOM_PACMAN_CONF="$scratch/pacman.conf" \
+  SMARTROOM_PACMAN_MIRRORLIST="$scratch/mirrorlist" \
+  "$fw/bin/smartroom-studio-setup"
 rm -rf "$scratch" "$overlay"
 
 # As on a stock Omarchy Mac (its install/config/enable-services.sh, which a
 # room does not run): nothing at boot waits for the network to come up.
 systemctl mask NetworkManager-wait-online.service
 
-install -D -m 0644 "$here/build-info" /usr/share/smartroomos/build-info
+install -D -m 0644 "$here/build-info" /usr/share/smartroom/build-info
 echo "setup: SmartRoom room layer installed"

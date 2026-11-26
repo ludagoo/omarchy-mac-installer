@@ -91,10 +91,10 @@ fi
 if [ -n "$fbenv" ]; then
   [ -f "$fbenv" ] && [ "$(wc -c <"$fbenv" | tr -d ' ')" -le 65536 ] ||
     die "--firstboot-env $fbenv is not a file of at most 64 KiB"
-  grep -Eq '^SMARTROOMOS_SERVER_URL=https?://[^[:space:]]+$' "$fbenv" ||
-    die "$fbenv has no SMARTROOMOS_SERVER_URL=http(s)://..."
-  grep -Eq '^SMARTROOMOS_AGENT_INSTALL_SHA256=[0-9a-fA-F]{64}$' "$fbenv" ||
-    die "$fbenv has no SMARTROOMOS_AGENT_INSTALL_SHA256=<64 hex digits>"
+  grep -Eq '^SMARTROOM_SERVER_URL=https?://[^[:space:]]+$' "$fbenv" ||
+    die "$fbenv has no SMARTROOM_SERVER_URL=http(s)://..."
+  grep -Eq '^SMARTROOM_AGENT_INSTALL_SHA256=[0-9a-fA-F]{64}$' "$fbenv" ||
+    die "$fbenv has no SMARTROOM_AGENT_INSTALL_SHA256=<64 hex digits>"
   ! grep -q "$(printf '\r')" "$fbenv" || die "$fbenv has CR line endings"
 fi
 

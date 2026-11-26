@@ -32,4 +32,4 @@ Remote Login for the admin account is on before a remote install. FileVault, a f
 
 ## After install
 
-First boot reads `firstboot.env` from the ESP (`SMARTROOMOS_SERVER_URL`, https only, and `SMARTROOMOS_AGENT_INSTALL_SHA256`). A production server needs `--production` on `engine-install`, which sets `SMARTROOMOS_PRODUCTION=1`. The room registers as pending until ops adopts it.
+First boot reads `firstboot.env` from the ESP (`SMARTROOM_SERVER_URL`, https only, and `SMARTROOM_AGENT_INSTALL_SHA256`). A production server needs `--production` on `engine-install`, which sets `SMARTROOM_PRODUCTION=1`. The room registers as pending until ops adopts it.

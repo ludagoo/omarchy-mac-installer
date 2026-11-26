@@ -20,7 +20,7 @@
 # Firmware image needs it (or an explicit --no-firstboot-env: first boot then
 # waits until the file is put there over SSH). Its server URL must be https.
 # The production server (SMARTROOM_PRODUCTION_HOST; empty means no host is
-# special) needs --production, which adds SMARTROOMOS_PRODUCTION=1 to the
+# special) needs --production, which adds SMARTROOM_PRODUCTION=1 to the
 # copy that goes onto the ESP (first boot refuses production without it);
 # --production with any other server, with no host configured, or a file
 # that already carries that line, is refused.
@@ -30,7 +30,7 @@
 #
 # Before the engine writes anything, this sets macOS's "Start up automatically
 # after a power failure" (pmset -a autorestart 1) and reads it back; a failure
-# only warns (smartroomos-ac-power sets the Studio's policy at every Linux boot).
+# only warns (smartroom-ac-power sets the Studio's policy at every Linux boot).
 #
 # The owner's macOS password is the first line of standard input. It is only
 # ever written to the engine's standard input, never to argv, env or a file.
@@ -96,18 +96,18 @@ else
   [[ -z $fbenv || $no_fbenv == 0 ]] || die "--firstboot-env or --no-firstboot-env, not both"
   [[ $production == 0 || -n $fbenv ]] || die "--production needs --firstboot-env (it marks that file)"
   if [[ -n $fbenv ]]; then
-    # What smartroomos-firstboot requires (it parses KEY=value, never sources).
+    # What smartroom-firstboot requires (it parses KEY=value, never sources).
     [[ -f $fbenv && $(wc -c <"$fbenv") -le 65536 ]] || die "--firstboot-env $fbenv is not a file of at most 64 KiB"
     ! grep -q $'\r' "$fbenv" || die "$fbenv has CR line endings"
-    [[ $(grep -c '^SMARTROOMOS_SERVER_URL=' "$fbenv") == 1 ]] ||
-      die "$fbenv needs exactly one SMARTROOMOS_SERVER_URL line"
-    grep -Eq '^SMARTROOMOS_SERVER_URL=https://[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9.])?(:[0-9]{1,5})?(/[^[:space:]]*)?$' "$fbenv" ||
-      die "$fbenv has no SMARTROOMOS_SERVER_URL=https://... (plain http is refused: anyone on the path could swap the Room Controller)"
-    grep -Eq '^SMARTROOMOS_AGENT_INSTALL_SHA256=[0-9a-fA-F]{64}$' "$fbenv" ||
-      die "$fbenv has no SMARTROOMOS_AGENT_INSTALL_SHA256=<64 hex digits>"
-    ! grep -q '^SMARTROOMOS_PRODUCTION=' "$fbenv" ||
-      die "$fbenv sets SMARTROOMOS_PRODUCTION; say --production instead"
-    host=$(sed -n 's|^SMARTROOMOS_SERVER_URL=https://||p' "$fbenv" | sed 's|[:/].*||; s|\.$||' | tr '[:upper:]' '[:lower:]')
+    [[ $(grep -c '^SMARTROOM_SERVER_URL=' "$fbenv") == 1 ]] ||
+      die "$fbenv needs exactly one SMARTROOM_SERVER_URL line"
+    grep -Eq '^SMARTROOM_SERVER_URL=https://[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9.])?(:[0-9]{1,5})?(/[^[:space:]]*)?$' "$fbenv" ||
+      die "$fbenv has no SMARTROOM_SERVER_URL=https://... (plain http is refused: anyone on the path could swap the Room Controller)"
+    grep -Eq '^SMARTROOM_AGENT_INSTALL_SHA256=[0-9a-fA-F]{64}$' "$fbenv" ||
+      die "$fbenv has no SMARTROOM_AGENT_INSTALL_SHA256=<64 hex digits>"
+    ! grep -q '^SMARTROOM_PRODUCTION=' "$fbenv" ||
+      die "$fbenv sets SMARTROOM_PRODUCTION; say --production instead"
+    host=$(sed -n 's|^SMARTROOM_SERVER_URL=https://||p' "$fbenv" | sed 's|[:/].*||; s|\.$||' | tr '[:upper:]' '[:lower:]')
     if [[ -n $production_host && $host == "$production_host" && $production == 0 ]]; then
       die "$fbenv names the production server; say --production"
     fi
@@ -125,7 +125,7 @@ else
     cp "$fbenv" "$run/firstboot.env"
     if (( production )); then
       [[ -z $(tail -c 1 "$run/firstboot.env") ]] || echo >>"$run/firstboot.env"
-      echo 'SMARTROOMOS_PRODUCTION=1' >>"$run/firstboot.env"
+      echo 'SMARTROOM_PRODUCTION=1' >>"$run/firstboot.env"
     fi
     chmod 600 "$run/firstboot.env"
   fi
@@ -549,7 +549,7 @@ fi
 # The room must come back by itself after a power cut, from the first minute:
 # macOS's own setting "Start up automatically after a power failure" (the PMU's
 # power-on policy, a byte that survives into Linux). Linux sets the Studio's
-# byte again at every boot (smartroomos-ac-power); this covers the install and
+# byte again at every boot (smartroom-ac-power); this covers the install and
 # 1TR in between. A failure here is a warning, never a reason to stop.
 power_failure_restart() {
   pmset -a autorestart 1 >/dev/null 2>&1 || true
@@ -557,7 +557,7 @@ power_failure_restart() {
     say "power: this Mac starts up by itself after a power failure (pmset autorestart 1)"
   else
     echo "WARNING: could not set or read back 'pmset -a autorestart 1'. The room will stay off after a power cut" \
-      "until SmartRoom Firmware's first boot sets it (smartroomos-ac-power); set it by hand if this Mac must survive one before then." >&2
+      "until SmartRoom Firmware's first boot sets it (smartroom-ac-power); set it by hand if this Mac must survive one before then." >&2
   fi
 }
 [[ -n $retry ]] || power_failure_restart
@@ -624,7 +624,7 @@ if [[ -f $run/firstboot.env ]]; then
   cmp -s "$run/firstboot.env" "$mount_point/asahi/extras/firstboot.env" ||
     die "asahi/extras/firstboot.env on $esp did not read back; copy $run/firstboot.env there by hand before step 2"
   rm -f "$mount_point/asahi/extras/._firstboot.env" "$mount_point/asahi/._extras"
-  echo "$esp: asahi/extras/firstboot.env ($(sed -n 's/^SMARTROOMOS_SERVER_URL=//p' "$run/firstboot.env"))"
+  echo "$esp: asahi/extras/firstboot.env ($(sed -n 's/^SMARTROOM_SERVER_URL=//p' "$run/firstboot.env"))"
 else
   echo "$esp: no firstboot.env (first boot waits for /boot/efi/asahi/extras/firstboot.env)"
 fi

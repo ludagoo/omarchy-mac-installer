@@ -8,7 +8,7 @@
 smartroom-omarchy-helpers # Omarchy runtime files omarchy-mac-boot calls (no desktop)
 smartroom-boot-os        # switch between SmartRoom Firmware and macOS (aurora-bless)
 smartroom-release        # update and roll back by trial boot (aura-try), the Room Controller's helper
-cloudflared              # per-room Cloudflare SSH tunnel (firmware smartroomos-tunnel.service; ALARM extra, as the Mini)
+cloudflared              # per-room Cloudflare SSH tunnel (firmware smartroom-tunnel.service; ALARM extra, as the Mini)
 omarchy-keyring          # Omarchy package key; first boot populates it
 snapper                  # Omarchy's snapper root config (bottom layer, install/config/snapper.sh)
 speakersafetyd           # speakers stay muted without it
@@ -33,3 +33,7 @@ zram-generator           # swap without a partition
 openssh                  # key-only remote, on from the first boot
 python                   # SmartRoom room program runtime
 inetutils                # hostname (room program install)
+usbmuxd                  # iPad USB mux (udev). Arch 1.1.1 does not switch Internet Sharing mode
+libimobiledevice         # lockdown tools (idevicepair) for the one-time trust check
+dnsmasq                  # DHCP and DNS for NetworkManager ipv4.method=shared
+iptables                 # NAT for that shared profile; the image has no filter firewall

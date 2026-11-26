@@ -12,11 +12,11 @@ bad() { echo "FAIL: $*"; fail=1; }
 good_tree() { # $1 = root
   local r=$1
   rm -rf "$r"
-  mkdir -p "$r/usr/share/smartroomos/hypr" "$r/usr/local/bin" "$r/etc/sudoers.d" \
+  mkdir -p "$r/usr/share/smartroom/hypr" "$r/usr/local/bin" "$r/etc/sudoers.d" \
     "$r/etc/systemd/logind.conf.d" "$r/etc/systemd/system.conf.d" "$r/etc/systemd/system" \
     "$r/usr/lib/systemd/logind.conf.d" "$r/etc/ssh/sshd_config.d" \
     "$r/var/lib/pacman/local/greetd-0.10-1" "$r/home/smartroomcontroller/.config"
-  cat >"$r/usr/share/smartroomos/hypr/hyprland.conf" <<'EOF'
+  cat >"$r/usr/share/smartroom/hypr/hyprland.conf" <<'EOF'
 # No key binds at all: a classroom keyboard must reach nothing.
 input {
     kb_options = srvrkeys:none
@@ -25,28 +25,28 @@ cursor {
     invisible = true
 }
 EOF
-  cat >"$r/usr/share/smartroomos/hypr/hyprland.lua" <<'EOF'
+  cat >"$r/usr/share/smartroom/hypr/hyprland.lua" <<'EOF'
 -- No key binds at all (no hl.bind here).
 hl.config({
     input = { kb_options = "srvrkeys:none", },
     cursor = { invisible = true, },
 })
 EOF
-  cat >"$r/usr/local/bin/smartroomos-session" <<'EOF'
+  cat >"$r/usr/local/bin/smartroom-session" <<'EOF'
 kiosk_config() {
-  local dir=/usr/share/smartroomos/hypr ver
+  local dir=/usr/share/smartroom/hypr ver
 }
 mkdir -p "${XDG_CACHE_HOME:-$HOME/.cache}" 2>/dev/null || true
 EOF
   printf 'root:!*:20000::::::\nsmartroomcontroller:!:20000::::::\nalarm:!$6$x:20000::::::\n' >"$r/etc/shadow"
   printf 'root:x:0:0::/root:/bin/bash\nalarm:x:1000:1000::/home/alarm:/bin/bash\nsmartroomcontroller:x:1001:1001::/home/smartroomcontroller:/bin/bash\n' >"$r/etc/passwd"
   printf 'root:x:0:\nwheel:x:998:alarm\nuucp:x:986:smartroomcontroller\n' >"$r/etc/group"
-  printf 'PasswordAuthentication no\n' >"$r/etc/ssh/sshd_config.d/99-smartroomos.conf"
+  printf 'PasswordAuthentication no\n' >"$r/etc/ssh/sshd_config.d/99-smartroom.conf"
   cat >"$r/etc/sudoers.d/smartroomcontroller" <<'EOF'
 # Only the Room Controller's commands; never ALL.
 Cmnd_Alias SR_SNAPSHOT = \
-    /usr/local/bin/smartroomos-snapshot ^(status|list) --json$, \
-    /usr/local/bin/smartroomos-snapshot ^(protect|unprotect|delete) [0-9]+ --json$
+    /usr/local/bin/smartroom-snapshot ^(status|list) --json$, \
+    /usr/local/bin/smartroom-snapshot ^(protect|unprotect|delete) [0-9]+ --json$
 Cmnd_Alias SR_ROLLBACK = \
     /usr/local/bin/smartroom-rollback ^status --json$, \
     /usr/local/sbin/smartroom-rollback ^status --json$
@@ -65,8 +65,8 @@ EOF
       printf '%s=ignore\n%sLongPress=ignore\n' "$k" "$k"
     done
     printf 'NAutoVTs=0\nReserveVT=0\n'
-  } >"$r/etc/systemd/logind.conf.d/smartroomos-keys.conf"
-  printf '[Manager]\nCtrlAltDelBurstAction=none\n' >"$r/etc/systemd/system.conf.d/smartroomos-keys.conf"
+  } >"$r/etc/systemd/logind.conf.d/smartroom-keys.conf"
+  printf '[Manager]\nCtrlAltDelBurstAction=none\n' >"$r/etc/systemd/system.conf.d/smartroom-keys.conf"
   ln -s /dev/null "$r/etc/systemd/system/ctrl-alt-del.target"
   ln -s /dev/null "$r/etc/systemd/system/getty@tty1.service"
 }
@@ -112,40 +112,40 @@ must_fail "no sbin smartroom-rollback rule" "smartroom-rollback status --json" \
 must_fail "foot installed" "foot not installed" mkdir -p "$r/var/lib/pacman/local/foot-1.20-1"
 must_fail "kitty installed" "kitty not installed" mkdir -p "$r/var/lib/pacman/local/kitty-0.40-1"
 must_fail "a terminal bind (conf)" "no key binds or exec in hyprland.conf" \
-  bash -c 'printf "bind = SUPER, Return, exec, foot\n" >>"$1"' _ "$r/usr/share/smartroomos/hypr/hyprland.conf"
+  bash -c 'printf "bind = SUPER, Return, exec, foot\n" >>"$1"' _ "$r/usr/share/smartroom/hypr/hyprland.conf"
 must_fail "exec-once (conf)" "no key binds or exec in hyprland.conf" \
-  bash -c 'printf "exec-once = foot\n" >>"$1"' _ "$r/usr/share/smartroomos/hypr/hyprland.conf"
+  bash -c 'printf "exec-once = foot\n" >>"$1"' _ "$r/usr/share/smartroom/hypr/hyprland.conf"
 must_fail "a terminal bind (lua)" "no key binds or exec in hyprland.lua" \
-  bash -c 'printf "hl.bind(\"SUPER + Return\", hl.dsp.exec_cmd(\"foot\"))\n" >>"$1"' _ "$r/usr/share/smartroomos/hypr/hyprland.lua"
+  bash -c 'printf "hl.bind(\"SUPER + Return\", hl.dsp.exec_cmd(\"foot\"))\n" >>"$1"' _ "$r/usr/share/smartroom/hypr/hyprland.lua"
 must_fail "VT switch on (conf)" "srvrkeys:none" \
-  sed -i '/kb_options/d' "$r/usr/share/smartroomos/hypr/hyprland.conf"
+  sed -i '/kb_options/d' "$r/usr/share/smartroom/hypr/hyprland.conf"
 must_fail "VT switch on (lua)" "srvrkeys:none" \
-  sed -i '/kb_options/d' "$r/usr/share/smartroomos/hypr/hyprland.lua"
+  sed -i '/kb_options/d' "$r/usr/share/smartroom/hypr/hyprland.lua"
 must_fail "kiosk config in skel" "no kiosk config in /etc/skel" mkdir -p "$r/etc/skel/.config/hypr"
 must_fail "kiosk config copied to the home" "no kiosk hyprland.lua in /home" \
   bash -c 'mkdir -p "$1/.config/hypr" && : >"$1/.config/hypr/hyprland.lua"' _ "$r/home/smartroomcontroller"
-must_fail "image kiosk config missing" "owned by the image: /usr/share/smartroomos/hypr/hyprland.conf" \
-  rm "$r/usr/share/smartroomos/hypr/hyprland.conf"
-must_fail "session reads the home" "starts Hyprland with /usr/share/smartroomos/hypr" \
-  sed -i 's|local dir=/usr/share/smartroomos/hypr ver|local dir=$HOME/.config/hypr ver|' "$r/usr/local/bin/smartroomos-session"
-must_fail "no ~/.cache" "creates ~/.cache" sed -i '/XDG_CACHE_HOME/d' "$r/usr/local/bin/smartroomos-session"
+must_fail "image kiosk config missing" "owned by the image: /usr/share/smartroom/hypr/hyprland.conf" \
+  rm "$r/usr/share/smartroom/hypr/hyprland.conf"
+must_fail "session reads the home" "starts Hyprland with /usr/share/smartroom/hypr" \
+  sed -i 's|local dir=/usr/share/smartroom/hypr ver|local dir=$HOME/.config/hypr ver|' "$r/usr/local/bin/smartroom-session"
+must_fail "no ~/.cache" "creates ~/.cache" sed -i '/XDG_CACHE_HOME/d' "$r/usr/local/bin/smartroom-session"
 must_fail "a later drop-in turns the power key back on" "HandlePowerKey=ignore" \
   bash -c 'printf "[Login]\nHandlePowerKey=poweroff\n" >"$1/etc/systemd/logind.conf.d/zz-omarchy.conf"' _ "$r"
-must_fail "the room's drop-in missing" "HandleRebootKey=ignore" rm "$r/etc/systemd/logind.conf.d/smartroomos-keys.conf"
+must_fail "the room's drop-in missing" "HandleRebootKey=ignore" rm "$r/etc/systemd/logind.conf.d/smartroom-keys.conf"
 must_fail "a later /run drop-in" "NAutoVTs=0" \
   bash -c 'mkdir -p "$1/run/systemd/logind.conf.d" && printf "[Login]\nNAutoVTs=6\n" >"$1/run/systemd/logind.conf.d/zz-run.conf"' _ "$r"
 must_fail "Ctrl+Alt+Del burst reboots" "CtrlAltDelBurstAction=none" \
-  rm "$r/etc/systemd/system.conf.d/smartroomos-keys.conf"
+  rm "$r/etc/systemd/system.conf.d/smartroom-keys.conf"
 grep -q 'unbound variable\|bad array subscript' <<<"$out" && bad "no drop-ins at all must not break the check"
 must_fail "ctrl-alt-del.target not masked" "ctrl-alt-del.target masked" rm "$r/etc/systemd/system/ctrl-alt-del.target"
-must_fail "sshd passwords on" "sshd key-only" rm "$r/etc/ssh/sshd_config.d/99-smartroomos.conf"
+must_fail "sshd passwords on" "sshd key-only" rm "$r/etc/ssh/sshd_config.d/99-smartroom.conf"
 
 # A same-name drop-in in /etc wins over /usr/lib; a key outside [Login] is not read.
 good_tree "$r"
-printf '[Login]\nHandlePowerKey=poweroff\n' >"$r/usr/lib/systemd/logind.conf.d/smartroomos-keys.conf"
+printf '[Login]\nHandlePowerKey=poweroff\n' >"$r/usr/lib/systemd/logind.conf.d/smartroom-keys.conf"
 bash "$check" "$r" >/dev/null 2>&1 || bad "an /etc drop-in must win a name over /usr/lib"
 mkdir -p "$r/run/systemd/logind.conf.d"
-printf '[Login]\nNAutoVTs=6\n' >"$r/run/systemd/logind.conf.d/smartroomos-keys.conf"
+printf '[Login]\nNAutoVTs=6\n' >"$r/run/systemd/logind.conf.d/smartroom-keys.conf"
 bash "$check" "$r" >/dev/null 2>&1 || bad "an /etc drop-in must win a name over /run"
 rm -r "$r/run"
 printf '[Other]\nHandlePowerKey=poweroff\n' >"$r/etc/systemd/logind.conf.d/zz-other.conf"

@@ -113,7 +113,7 @@ grep -qx 'release=2026.11.20-studio-edge' "$dir/RELEASE" && grep -qx 'line=studi
 cmp -s "$dir/smartroom-release.db" "$target/var/lib/pacman/sync/smartroom-release.db" &&
   cmp -s "$dir/smartroom-release.db.sig" "$target/var/lib/pacman/sync/smartroom-release.db.sig" ||
   bad "the image's sync database is the signed release database"
-[[ -f $target/usr/share/smartroomos/release/PACKAGES.sig && -f $target/usr/share/smartroomos/release/RELEASE ]] ||
+[[ -f $target/usr/share/smartroom/release/PACKAGES.sig && -f $target/usr/share/smartroom/release/RELEASE ]] ||
   bad "the image keeps its signed release record"
 ok "the release repository is the record, signed on the build host, and the image's sync database"
 

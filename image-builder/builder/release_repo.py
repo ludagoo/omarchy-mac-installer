@@ -4,7 +4,7 @@
 A release is one exact package set served as one signed pacman repository,
 [smartroom-release], at <base>/<version>. The installed /etc/pacman.conf names
 only that repository through /etc/pacman.d/smartroom-release, the mirror file
-ludagoo/smartroomcontrollerfirmware's release-lib.sh and smartroomos-release
+ludagoo/smartroomcontrollerfirmware's release-lib.sh and smartroom-release-repo
 read and switch.
 
   check-release FILE     FILE (version=, url=) names a release
@@ -123,7 +123,7 @@ def mirror(version, url):
     check_release(version, url)
     return (f'# SmartRoom release {version}. This room takes packages only from this signed\n'
             '# repository; it moves to another release only through\n'
-            '# smartroomos-release switch <version>.\n'
+            '# smartroom-release-repo switch <version>.\n'
             f'# release={version}\n'
             f'Server = {url}\n')
 
