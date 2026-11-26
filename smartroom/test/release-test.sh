@@ -32,7 +32,7 @@ gpg --batch --quiet --passphrase '' --quick-gen-key 'release test <release-test@
 key=$(gpg --batch --with-colons --list-secret-keys 2>/dev/null | awk -F: '$1 == "fpr" { print $10; exit }')
 gpg --batch --armor --export "$key" >"$smartroom_dir/key.asc"
 printf '%s\n' "$key" >"$smartroom_dir/key.fpr"
-printf 'version=2026.11.20-studio-edge\nurl=https://smartroom.goossen.dev/releases/2026.11.20-studio-edge\n' >"$smartroom_dir/release"
+printf 'version=2026.11.20-studio-edge\nurl=https://releases.example/releases/2026.11.20-studio-edge\n' >"$smartroom_dir/release"
 
 smartroom_release || bad "a release file makes a release image"
 [[ $(release_dir) == "$release_root/2026.11.20-studio-edge" ]] || bad "the release directory is OUT/release/VERSION"
@@ -62,14 +62,15 @@ grep -qx 'SigLevel = Required DatabaseRequired' "$target/etc/pacman.conf" &&
 ! grep -qE 'Optional|TrustAll|Never' "$target/etc/pacman.conf" || bad "a release image accepts no unsigned package"
 grep -qx 'Include = /etc/pacman.d/smartroom-release' "$target/etc/pacman.conf" || bad "the repository comes from the mirror file"
 grep -qx '# release=2026.11.20-studio-edge' "$target/etc/pacman.d/smartroom-release" &&
-  grep -qx 'Server = https://smartroom.goossen.dev/releases/2026.11.20-studio-edge' "$target/etc/pacman.d/smartroom-release" ||
+  grep -qx 'Server = https://releases.example/releases/2026.11.20-studio-edge' "$target/etc/pacman.d/smartroom-release" ||
   bad "the mirror file names the release at its URL"
 [[ -z $test_image_pin ]] || bad "a release image carries no test pin"
 ok "a release image's pacman.conf names only its signed release repository"
 
 grep -q 'release_version=${release_version:-$(date -u +%Y.%m.%d)-studio-${channel:-unknown}}' "$here/../build-image" ||
   bad "build-image makes a release by default"
-grep -q 'release_base=https://smartroom.goossen.dev/releases' "$here/../build-image" || bad "the release base defaults to the SmartRoom server"
+grep -q 'no release base: set SMARTROOM_RELEASE_BASE' "$here/../build-image" || bad "a release build errors when no release base is set"
+grep -q 'SMARTROOM_PRODUCTION_HOST' "$here/../build-image" || bad "the release base can be derived from the production host"
 grep -q -- '--dev) dev=true' "$here/../build-image" || bad "build-image has the --dev switch"
 grep -q 'build_release_repository' <(declare -f configure_image) || bad "configure_image builds the release repository"
 awk '/^  record_packages$/ { r = NR } /^  build_release_repository$/ { b = NR } /^  keep_installed_databases$/ { k = NR }

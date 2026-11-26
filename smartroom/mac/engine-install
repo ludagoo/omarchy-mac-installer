@@ -19,10 +19,11 @@
 # the new ESP as asahi/extras/firstboot.env, beside install.conf. A SmartRoom
 # Firmware image needs it (or an explicit --no-firstboot-env: first boot then
 # waits until the file is put there over SSH). Its server URL must be https.
-# The production server (smartroom.goossen.dev) needs --production, which adds
-# SMARTROOMOS_PRODUCTION=1 to the copy that goes onto the ESP (first boot
-# refuses production without it); --production with any other server, or a
-# file that already carries that line, is refused.
+# The production server (SMARTROOM_PRODUCTION_HOST; empty means no host is
+# special) needs --production, which adds SMARTROOMOS_PRODUCTION=1 to the
+# copy that goes onto the ESP (first boot refuses production without it);
+# --production with any other server, with no host configured, or a file
+# that already carries that line, is refused.
 # At the end the new stub must be the Mac's default startup volume (the
 # engine blesses it with --setBoot, as asahi does, so step 2 in 1TR needs one
 # pass); this checks that again on its own and re-blesses if it is not.
@@ -50,7 +51,11 @@ here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 repo=$here/../.. state=/var/root/omarchy-engine-install retry="" yes=0 readback=0
 payload="" sha="" metadata="" owner="" source="" size="" encrypt=0 lane=stable engine=""
 fbenv="" no_fbenv=0 production=0
-production_host=smartroom.goossen.dev
+production_host=${SMARTROOM_PRODUCTION_HOST:-}
+production_host=${production_host#"${production_host%%[![:space:]]*}"}
+production_host=${production_host%"${production_host##*[![:space:]]}"}
+production_host=${production_host%.}
+production_host=${production_host,,}
 restore=""   # default: the app's helper, /Applications/<INSTALLER_APP_NAME>.app/Contents/Helpers
 while (( $# )); do
   case $1 in
@@ -103,11 +108,14 @@ else
     ! grep -q '^SMARTROOMOS_PRODUCTION=' "$fbenv" ||
       die "$fbenv sets SMARTROOMOS_PRODUCTION; say --production instead"
     host=$(sed -n 's|^SMARTROOMOS_SERVER_URL=https://||p' "$fbenv" | sed 's|[:/].*||; s|\.$||' | tr '[:upper:]' '[:lower:]')
-    if [[ $host == "$production_host" && $production == 0 ]]; then
-      die "$fbenv names the production server ($production_host); say --production"
+    if [[ -n $production_host && $host == "$production_host" && $production == 0 ]]; then
+      die "$fbenv names the production server; say --production"
     fi
-    if [[ $host != "$production_host" && $production == 1 ]]; then
-      die "--production needs the production server ($production_host), not $host"
+    if [[ $production == 1 && -z $production_host ]]; then
+      die "--production needs SMARTROOM_PRODUCTION_HOST"
+    fi
+    if [[ $production == 1 && $host != "$production_host" ]]; then
+      die "--production needs the production server, not $host"
     fi
   fi
   mkdir -p "$state"; chmod 700 "$state"

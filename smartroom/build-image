@@ -15,12 +15,14 @@
 # never leaves this host), and the room's pacman.conf names only that
 # repository at BASE/VERSION. Publish OUT/release/VERSION there.
 #   --release-version VERSION  default YYYY.MM.DD-studio-LANE (UTC)
-#   --release-base BASE        default https://smartroom.goossen.dev/releases
+#   --release-base BASE        default SMARTROOM_RELEASE_BASE, or
+#                              https://$SMARTROOM_PRODUCTION_HOST/releases.
+#                              A release with neither set is an error.
 #   --dev                      follow the live channel instead (no release)
 set -euo pipefail
 here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 inputs="" recovery="" cache="" packages="" firmware="" keys="" dev=false
-release_version="" release_base=https://smartroom.goossen.dev/releases
+release_version="" release_base=""
 firmware_repo=https://github.com/ludagoo/smartroomcontrollerfirmware.git
 while (($# > 1)); do
   case $1 in
@@ -33,6 +35,15 @@ while (($# > 1)); do
   esac
   shift 2
 done
+if [[ -z $release_base ]]; then
+  release_base=${SMARTROOM_RELEASE_BASE:-}
+  release_base=${release_base%/}
+fi
+if [[ -z $release_base && -n ${SMARTROOM_PRODUCTION_HOST:-} ]]; then
+  prod_host=${SMARTROOM_PRODUCTION_HOST%.}
+  prod_host=$(printf '%s' "$prod_host" | tr '[:upper:]' '[:lower:]')
+  release_base="https://${prod_host}/releases"
+fi
 out=${1:?Usage: see the header}
 [[ -n $inputs && -n $recovery && -n $cache && -d $packages/repo && -n $firmware && -f $keys ]] ||
   { echo "missing an option (see the header)" >&2; exit 64; }
@@ -42,6 +53,10 @@ if $dev; then
   [[ -z $release_version ]] || { echo "--dev builds no release; drop --release-version" >&2; exit 64; }
 else
   release_version=${release_version:-$(date -u +%Y.%m.%d)-studio-${channel:-unknown}}
+  if [[ -z $release_base ]]; then
+    echo "no release base: set SMARTROOM_RELEASE_BASE, or SMARTROOM_PRODUCTION_HOST (https://<host>/releases), or pass --release-base" >&2
+    exit 64
+  fi
 fi
 dir=$(mktemp -d); trap 'rm -rf "$dir"' EXIT
 cp -a "$packages/repo" "$dir/repo"

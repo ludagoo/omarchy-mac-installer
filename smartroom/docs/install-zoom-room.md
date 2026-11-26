@@ -128,8 +128,8 @@ SMARTROOMOS_AGENT_INSTALL_SHA256=<curl -fsS https://<server>/api/agent/install.s
 SMARTROOMOS_UNIQUE_ID=<optional pre-minted uuid>
 ```
 
-The server URL must be https. For the production host (the host
-`production_host` in `smartroom/mac/engine-install` compares against) add
+The server URL must be https. For the production host
+(`SMARTROOM_PRODUCTION_HOST`; empty means no host is special) add
 `--production` to the `engine-install` arguments below; it writes
 `SMARTROOMOS_PRODUCTION=1` into the ESP copy, and first boot refuses
 production without it. Do not put that line in the file yourself;
