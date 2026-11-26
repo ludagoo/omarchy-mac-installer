@@ -72,8 +72,8 @@ which is where the SmartRoom agent looks for a browser.
 
 A SmartRoom build is a **release** unless it is built with `--dev`
 (PROGRAM decision 4). `smartroom/build-image --release-version V
---release-base URL` (defaults `YYYY.MM.DD-studio-<channel>` and
-`https://smartroom.goossen.dev/releases`) records every installed package
+--release-base URL` (defaults `YYYY.MM.DD-studio-<channel>` and the release base URL passed
+to `--release-base`, per install) records every installed package
 (name, version, file, sha256) and writes `OUT/release/V`: those archives,
 each with its publisher's signature (Arch Linux ARM, Asahi ALARM, Omarchy,
 or the SmartRoom key for our own), a `[smartroom-release]` database,
@@ -106,7 +106,7 @@ CI: `.github/workflows/smartroom-ci.yml` runs `image-builder/test/all` and
 `smartroom/test/all` (with ludagoo/omarchy-mac-pkgs at `PKGS_REF` beside
 it) on pushes to `smartroom/main`, `smartroom/edge` and `fix/**`, read-only
 and without secrets. Actions are disabled on this fork, so it does not run
-until Lucas enables them. To enable: turn Actions on, then at once disable
+until the maintainer enables them. To enable: turn Actions on, then at once disable
 every inherited workflow (`gh workflow disable` each one except
 `SmartRoom checks`), because their files on `main` (`mac-image`,
 `mac-upload`, `mac-catalog-sign`, `mac-promote`, `mac-app-release` …) would
@@ -198,10 +198,9 @@ as stock Omarchy's desktop setup does.
 
 ### The edge image and the power-on policy
 
-The image to install is `smartroom-edge-2026.11.20` (installer `ddc216c`,
-packages `7809f7c`, firmware `af9323e`; `install-zoom-room.md` section 2b).
-`smartroom-3` (stable) is marked do-not-install. Rebuild with
-`smartroom/hardware/build-edge-image`; checks and results are in
+The image to install is the one desk-check passed. Rebuild with
+`smartroom/hardware/build-edge-image`. Do not install an image from before
+the zero-touch fixes (Limine checksums on, or `panic=10` missing). Checks:
 `smartroom/docs/cold-boot-checks.md`.
 
 `mesa-aurora` and `vulkan-aurora` (pkgs `smartroom/pkgbuilds/mesa-aurora`,
@@ -219,12 +218,11 @@ runs `pmset -a autorestart 1` at install (not on `--retry` or a dry run) and
 says whether it read back. A T2 Mac mini cannot be set from Linux; `mac/mini-install` runs the
 same `pmset` before it touches the disk and, unlike the Studio's installer,
 refuses to go on if the setting does not read back as 1 (a mini has no
-Linux-side fallback). A real power cut is still untested:
-`cold-boot-checks.md#power-cut-test-for-lucas`.
+Linux-side fallback). A real power cut is still untested. That procedure is not in this repository.
 
 ## Building
 
-On an aarch64 Arch Linux host with Docker (studio-build):
+On a native aarch64 Arch Linux host with Docker:
 
 ```sh
 image-builder/bin/mac-image-inputs resolve INPUTS --channel-set --channel stable --release-tag v4.5.0 \
@@ -295,6 +293,6 @@ fork's own `smartroom-ci.yml` waits for the enable procedure above.
 
 ## Rules
 
-- Patches by an AI agent carry `Assisted-by: Claude:claude-opus-5-5` and no
+- Commit as the maintainer. No `Assisted-by` trailer and no
   `Signed-off-by`. Upstream PRs go to omacom only (never AsahiLinux), and only
-  as drafts Lucas reviews and sends.
+  as drafts the maintainer reviews and sends.

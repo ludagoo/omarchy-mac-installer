@@ -53,7 +53,7 @@ layout, so they stay:
 - text the app does not own: macOS's own tools' output in Show Details
   (bputil, kmutil, bless), and the `aura` command's name.
 
-Measured on the home Studio (macOS 14.5, CLT 16.2, preview build of
+Measured on a test Mac Studio (macOS 14.5, CLT 16.2, preview build of
 `6dcf34a`, `OUT/screens/install/names.txt`):
 
 | What macOS reports | Value |
