@@ -7,6 +7,37 @@ check=$here/../../image-builder/builder/j475c_display_dtb.py
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
+# dtc 1.7 (Ubuntu 24.04) prints a string list as one string with \0.
+# dtc 1.8 (the image build) prints separate quotes. The checker reads the
+# 1.8 form. This stand-in only rewrites the 1.7 spelling.
+mkdir -p "$work/bin"
+cat >"$work/bin/dtc" <<'EOF'
+#!/bin/bash
+real=/usr/bin/dtc
+fmt=""
+prev=""
+for a in "$@"; do
+  if [[ $prev == -O ]]; then fmt=$a; fi
+  prev=$a
+done
+if [[ $fmt == dts ]]; then
+  "$real" "$@" | python3 -c '
+import re, sys
+text = sys.stdin.read()
+def split_nul(m):
+    inner = m.group(1)
+    if "\\0" not in inner:
+        return m.group(0)
+    return ", ".join(f"\"{p}\"" for p in inner.split("\\0"))
+sys.stdout.write(re.sub(r"\"((?:[^\"\\]|\\.)*)\"", split_nul, text))
+'
+else
+  exec "$real" "$@"
+fi
+EOF
+chmod +x "$work/bin/dtc"
+export PATH="$work/bin:$PATH"
+
 cat >"$work/base.dts" <<'DTS'
 /dts-v1/;
 

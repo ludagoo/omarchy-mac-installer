@@ -960,8 +960,11 @@ if command -v pacman >/dev/null 2>&1; then
   for repository in omarchy-candidates asahi-alarm core alarm aur omarchy-aarch64; do
     bsdtar -czf "$scratch/dbpath/sync/$repository.db" --files-from /dev/null
   done
+  # --arch aarch64: the image is aarch64. Architecture=auto on an x86_64
+  # pacman (this Mini) refuses those packages. The check is which repository
+  # wins, and it does not install anything.
   resolved() {
-    pacman --config "$1" --dbpath "$scratch/dbpath" --noconfirm -Sp --print-format '%r %v' hyprland 2>/dev/null
+    pacman --config "$1" --arch aarch64 --dbpath "$scratch/dbpath" --noconfirm -Sp --print-format '%r %v' hyprland 2>/dev/null
   }
   (
     candidates=$channel/candidates
@@ -1014,7 +1017,7 @@ if command -v pacman >/dev/null 2>&1; then
     done
   } >"$scratch/boot.conf"
   boot_resolved() {
-    pacman --config "$scratch/boot.conf" --dbpath "$scratch/boot-dbpath" --noconfirm -Sp --print-format '%r %n' "$@" 2>&1 | sort
+    pacman --config "$scratch/boot.conf" --arch aarch64 --dbpath "$scratch/boot-dbpath" --noconfirm -Sp --print-format '%r %n' "$@" 2>&1 | sort
   }
   expected=$'asahi-alarm asahi-scripts\nomarchy-candidates m1n1-aurora\nomarchy-candidates omarchy-mac-boot\nomarchy-candidates uboot-aurora'
   [[ $(boot_resolved omarchy-candidates/m1n1-aurora omarchy-candidates/uboot-aurora omarchy-candidates/omarchy-mac-boot) == "$expected" ]] ||
