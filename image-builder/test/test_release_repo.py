@@ -105,17 +105,17 @@ class ReleaseRepo(unittest.TestCase):
         # ludagoo/smartroomcontrollerfirmware release-lib.sh smartroom_release_mirror
         # writes, and smartroom-release-repo reads, exactly these lines.
         self.assertEqual(run('mirror', '2026.11.20-studio-edge',
-                             'https://smartroom.goossen.dev/releases/2026.11.20-studio-edge').stdout,
+                             'https://rooms.example/releases/2026.11.20-studio-edge').stdout,
                          '# SmartRoom release 2026.11.20-studio-edge. This room takes packages only from this signed\n'
                          '# repository; it moves to another release only through\n'
                          '# smartroom-release-repo switch <version>.\n'
                          '# release=2026.11.20-studio-edge\n'
-                         'Server = https://smartroom.goossen.dev/releases/2026.11.20-studio-edge\n')
+                         'Server = https://rooms.example/releases/2026.11.20-studio-edge\n')
 
     def test_release_file_is_checked(self):
         good = self.dir / 'good'
-        good.write_text('version=v1\nurl=https://smartroom.goossen.dev/releases/v1\n')
-        self.assertEqual(run('check-release', good).stdout, 'version=v1\nurl=https://smartroom.goossen.dev/releases/v1\n')
+        good.write_text('version=v1\nurl=https://rooms.example/releases/v1\n')
+        self.assertEqual(run('check-release', good).stdout, 'version=v1\nurl=https://rooms.example/releases/v1\n')
         for text in ('version=v1\nurl=https://x.test/releases/v2\n', 'version=../v1\nurl=https://x.test/../v1\n',
                      'version=v1\nurl=http://x.test/releases/v1\n', 'version=v1\n', 'url=https://x.test/v1\n',
                      'version=v1\nurl=https://x.test/releases//v1\n'):
