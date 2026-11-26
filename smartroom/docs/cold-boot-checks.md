@@ -52,7 +52,7 @@ Rules for every run (the safety section of the program):
 - `panic=10` stays on the kernel command line.
 - Never touch `end0`, NetworkManager's settings, Wi-Fi, sshd or the Room
   Controller. Never remove the Ethernet workaround profile.
-- If Linux does not answer within 10 minutes, try 192.168.1.166, then macOS. If
+- If Linux does not answer within 10 minutes, try 192.0.2.166, then macOS. If
   macOS answers, run no `sudo`, write `STUDIO NEEDS CLAUDE` to the status log
   and stop.
 
@@ -102,7 +102,7 @@ error" and the counter was clear after the next clean boot.
 - The Studio's package set is not the one our repo builds (other packages are
   newer or different); the room will drift until it is reinstalled from an image.
 
-## Power-cut test for Lucas
+## Power-cut test for the operator
 
 The power cannot be cut remotely, so this is not done yet. Marking the feature
 verified needs a person at the plug (or a switched power strip). Use the Studio
@@ -131,7 +131,7 @@ The step names match `docs/hardware-tests.md` in the firmware repo (P1 to P6).
 | Step | Do | Pass |
 | --- | --- | --- |
 | P1 | Read only, on the Studio over SSH: `smartroomos-ac-power status`; `cat /sys/bus/platform/drivers/macsmc-reboot/*/ac_power_mode`. | `mechanism=sysfs mode=restore`; the file prints `off [restore] always`; `systemctl status smartroomos-ac-power` is active (exited). |
-| P2 | Optional, and only if Lucas himself does it (macOS `sudo` is never run by an agent): in macOS `sudo pmset -a autorestart 0`, then Restart into Linux. | `journalctl -b -u smartroomos-ac-power` says `mode=restore (was off)`; a second reboot says `(was restore)`. |
+| P2 | Optional, and only if the operator himself does it (macOS `sudo` is never run by an agent): in macOS `sudo pmset -a autorestart 0`, then Restart into Linux. | `journalctl -b -u smartroomos-ac-power` says `mode=restore (was off)`; a second reboot says `(was restore)`. |
 | P3 | Linux up, `systemctl is-system-running` says `running`. Pull the plug, wait 60 s, plug back in. Do not press the power button. | The Studio powers on by itself within a minute; SSH answers within about 3 minutes of the plug; the desktop is up; the Room Controller shows online. Write down the seconds from plug to SSH. Then `smartroomos-ac-power status` says `(was restore)`. It booted Linux, not macOS and not the startup picker. |
 | P4 | `sudo systemctl poweroff`. When the light is off, wait 60 s with the plug in, then pull the plug for 60 s and plug back in. | It stays off ("restore" does not turn on after a clean shutdown). Press the power button; it boots Linux. |
 | P5 | Five 60 s cuts in a row, each only after SSH answers. | Linux every time; never recoveryOS or the picker; `journalctl -k | grep -i 'boot error'` shows no growth; the Room Controller comes back each time. |
