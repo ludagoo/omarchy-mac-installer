@@ -346,7 +346,7 @@ grep -q "run remove-firmware first" "$t/out" || fail "wrong F20 error: $(cat "$t
 ! grep -q '^MUTATE' "$FAKE_LOG" || fail "refusal mutated disk: $(cat "$FAKE_LOG")"
 echo "ok - preflight refuses wrong model, SIP on, firmware password, T2 Medium/Full Security, and existing install without touching disk"
 
-# 2. Dry-run plan (Lucas's rule: MinimumSize 50 GiB + 20 GiB = 70 GiB kept for macOS -> 160 GiB for SmartRoom)
+# 2. Dry-run plan (the operator's rule: MinimumSize 50 GiB + 20 GiB = 70 GiB kept for macOS -> 160 GiB for SmartRoom)
 reset_state_clean normal
 "$t/mi" --payload "$PAY" --sha256 "$PSHA" --installer-data "$IDATA" --firstboot-env "$t/fb.env" >"$t/out" 2>&1 || fail "dry run failed: $(cat "$t/out")"
 grep -q "shrink disk0s2 from 249 GiB to 70 GiB" "$t/out" || fail "dry run split wrong: $(cat "$t/out")"

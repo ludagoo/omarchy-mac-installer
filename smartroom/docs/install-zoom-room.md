@@ -73,7 +73,7 @@ On the Mac (or through Jamf):
 --size N`) or from free space. N is the whole SmartRoom Firmware install: the
 stub (2.5 GB), the ESP (500 MiB), Boot (2 GiB) and Root (the rest).
 
-Lucas's rule (2026-11-07, restated 2026-11-17, narrowed 2026-11-25): **macOS keeps only what it needs; SmartRoom
+the operator's rule (2026-11-07, restated 2026-11-17, narrowed 2026-11-25): **macOS keeps only what it needs; SmartRoom
 Firmware gets the rest of the disk.** macOS stays only for the Zoom Rooms transition.
 
 - The dry run lists the macOS container with `minimum_container_bytes` (what macOS itself needs;
@@ -128,11 +128,12 @@ SMARTROOMOS_AGENT_INSTALL_SHA256=<curl -fsS https://<server>/api/agent/install.s
 SMARTROOMOS_UNIQUE_ID=<optional pre-minted uuid>
 ```
 
-The server URL must be https. For the production server
-(`smartroom.goossen.dev`) add `--production` to the `engine-install`
-arguments below; it writes `SMARTROOMOS_PRODUCTION=1` into the ESP copy, and
-first boot refuses production without it. Do not put that line in the file
-yourself; `engine-install` refuses it.
+The server URL must be https. For the production host (the host
+`production_host` in `smartroom/mac/engine-install` compares against) add
+`--production` to the `engine-install` arguments below; it writes
+`SMARTROOMOS_PRODUCTION=1` into the ESP copy, and first boot refuses
+production without it. Do not put that line in the file yourself;
+`engine-install` refuses it.
 
 On the Mac, get Omarchy's signed restore-image helper (the engine requires
 it, even where it never runs it), from the app's DMG
@@ -254,7 +255,7 @@ writable from macOS (XNU allows it only to Apple-entitled processes), and
 `systemsetup -setstartupdisk` does not work on Apple Silicon. Research with
 sources: [research-bless-unattended.md](research-bless-unattended.md) (2026-11-17).
 
-The options, for Lucas to choose:
+The options, for the operator to choose:
 
 | | How a room goes macOS → SmartRoom Firmware | Credential on the Mac | Security cost | Caveats |
 | --- | --- | --- | --- | --- |
