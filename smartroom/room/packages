@@ -33,3 +33,7 @@ zram-generator           # swap without a partition
 openssh                  # key-only remote, on from the first boot
 python                   # SmartRoom room program runtime
 inetutils                # hostname (room program install)
+usbmuxd                  # iPad USB mux (udev). Arch 1.1.1 does not switch Internet Sharing mode
+libimobiledevice         # lockdown tools (idevicepair) for the one-time trust check
+dnsmasq                  # DHCP and DNS for NetworkManager ipv4.method=shared
+iptables                 # NAT for that shared profile; the image has no filter firewall

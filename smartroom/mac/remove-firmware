@@ -545,11 +545,11 @@ evidence_intel() {
     mounted=$esp
   fi
   if [ -s "$mp/EFI/BOOT/BOOTX64.EFI" ] || [ -s "$mp/EFI/limine/limine_x64.efi" ]; then has_efi=1; fi
-  if [ -s "$mp/limine.conf" ] || [ -d "$mp/smartroom" ] || [ -s "$mp/EFI/Linux/smartroomos_linux-t2.efi" ]; then has_meta=1; fi
+  if [ -s "$mp/limine.conf" ] || [ -d "$mp/smartroomos" ] || [ -s "$mp/EFI/Linux/smartroomos_linux-t2.efi" ]; then has_meta=1; fi
   if [ "$has_efi" -eq 0 ] || [ "$has_meta" -eq 0 ]; then
     die "refusing: $esp has no SmartRoom/Limine bootloader evidence, so it is not SmartRoom's ESP. Nothing was changed."
   fi
-  evidence_text="Limine $([ -s "$mp/EFI/BOOT/BOOTX64.EFI" ] && echo BOOTX64.EFI || echo limine_x64.efi), $([ -s "$mp/limine.conf" ] && echo limine.conf || echo smartroom)"
+  evidence_text="Limine $([ -s "$mp/EFI/BOOT/BOOTX64.EFI" ] && echo BOOTX64.EFI || echo limine_x64.efi), $([ -s "$mp/limine.conf" ] && echo limine.conf || echo smartroomos)"
   if [ -n "$mounted" ]; then
     diskutil unmount "$mounted" >/dev/null 2>&1 || die "could not unmount $mounted after reading it"
     mounted=""

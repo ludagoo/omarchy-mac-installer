@@ -472,7 +472,7 @@ esp_mp=$(need "$tmp/esp.info" MountPoint)
 [ -d "$esp_mp" ] || die "ESP mount point missing: $esp_mp"
 
 cp -RX "$unpack/esp/." "$esp_mp/"
-mkdir -p "$esp_mp/smartroom"
+mkdir -p "$esp_mp/smartroomos"
 if [ -n "$fbenv" ]; then
   cp -X "$fbenv" "$esp_mp/smartroomos/firstboot.env"
 fi
@@ -485,8 +485,8 @@ if [ -d "$mac_fw_dir/bluetooth" ]; then
   mkdir -p "$esp_mp/smartroomos/macos-firmware/bluetooth"
   cp -RX "$mac_fw_dir/bluetooth/." "$esp_mp/smartroomos/macos-firmware/bluetooth/"
 fi
-[ ! -s "$run/macos-boot-device.xml" ] || cp -X "$run/macos-boot-device.xml" "$esp_mp/smartroom/"
-[ ! -s "$run/macos-boot-device.bin" ] || cp -X "$run/macos-boot-device.bin" "$esp_mp/smartroom/"
+[ ! -s "$run/macos-boot-device.xml" ] || cp -X "$run/macos-boot-device.xml" "$esp_mp/smartroomos/"
+[ ! -s "$run/macos-boot-device.bin" ] || cp -X "$run/macos-boot-device.bin" "$esp_mp/smartroomos/"
 
 [ -s "$esp_mp/$boot_object" ] || die "missing $boot_object on SmartRoom ESP"
 bless --mount "$esp_mp" --setBoot --file "$esp_mp/$boot_object" --shortform ||
@@ -496,8 +496,8 @@ nvram -d "${APPLE_BOOT_GUID}:efi-boot-next" >/dev/null 2>&1 || true
 nvram -d "${APPLE_BOOT_GUID}:efi-boot-next-data" >/dev/null 2>&1 || true
 nvram -x -p >"$run/post-nvram.plist" 2>/dev/null || true
 save_nv_pair "$run/post-nvram.plist" device "$run/firmware-boot-device"
-[ ! -s "$run/firmware-boot-device.xml" ] || cp -X "$run/firmware-boot-device.xml" "$esp_mp/smartroom/"
-[ ! -s "$run/firmware-boot-device.bin" ] || cp -X "$run/firmware-boot-device.bin" "$esp_mp/smartroom/"
+[ ! -s "$run/firmware-boot-device.xml" ] || cp -X "$run/firmware-boot-device.xml" "$esp_mp/smartroomos/"
+[ ! -s "$run/firmware-boot-device.bin" ] || cp -X "$run/firmware-boot-device.bin" "$esp_mp/smartroomos/"
 
 boot_now=$(bless --getBoot 2>/dev/null || true)
 find "$esp_mp" -name '._*' -delete 2>/dev/null || true
