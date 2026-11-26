@@ -66,8 +66,12 @@ if bash "$src" plan --owner 'room owner' --image-dir "$t/image" --engine "$t/bin
 fi
 grep -q 'spaces' "$t/err" || fail "spaced owner message"
 
-if grep -E -q 'zoomclassroom|goossen|moody' "$src"; then
+# No site value in the launcher: no URL, and the owner is only ever set from
+# --owner or the console (never a baked account name). The install's own
+# names come from SITE_LINT_PATTERNS (one skip line when it is not set).
+if grep -nE 'https?://|(^|[[:space:];])owner=[A-Za-z0-9_"'"'"']' "$src"; then
   fail "launcher contains a site value"
 fi
+python3 "$here/site_lint.py" --files "$src" || fail "launcher names the install (SITE_LINT_PATTERNS)"
 
 echo "ok - run-install"

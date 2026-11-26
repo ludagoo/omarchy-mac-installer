@@ -333,8 +333,7 @@ python3 -c 'import plistlib,sys; open(sys.argv[1],"wb").write(plistlib.dumps({"l
 pkgname=smartroom-firmware-2026.11.17-aarch64-apple-silicon-mac-stable-os-package.zip
 echo payload >"$t/img/$pkgname"
 psha=$(sha256sum "$t/img/$pkgname" | cut -d' ' -f1)
-sed "s|\"package\": \".*\"|\"package\": \"$pkgname\"|" "$HOME/smartroom-omarchy-fork/release/smartroom/installer_data.json" >"$t/img/installer_data.json" 2>/dev/null ||
-  python3 - "$t/img/installer_data.json" "$pkgname" <<'PY'
+python3 - "$t/img/installer_data.json" "$pkgname" <<'PY'
 import json, sys
 json.dump({"os_list": [{"name": "SmartRoom Firmware", "default_os_name": "SmartRoom Firmware",
   "omarchy_target": "apple-silicon-full-os", "boot_object": "m1n1.bin", "next_object": "m1n1/boot.bin",
@@ -362,7 +361,7 @@ grep -q "SMARTROOM_AGENT_INSTALL_SHA256" "$t/out" || fail "wrong refusal: $(tail
 pw "$PW" | CONSOLE_USER="" "$ei" "${common[@]}" --firstboot-env "$t/fb.env" >"$t/out" 2>&1 && fail "ran with no console user"
 grep -q "no user is logged in at this Mac's console" "$t/out" || fail "wrong refusal: $(tail -3 "$t/out")"
 # Only the --owner value changes: a ${common[@]/lucas/nobody} would also rewrite every path that contains
-# "lucas" (a scratch dir under /home/lucas), and the run would stop at "missing --payload" instead.
+# "lucas" (a scratch dir under a home of that name), and the run would stop at "missing --payload" instead.
 other=(); prev=""
 for a in "${common[@]}"; do [[ $prev == --owner ]] && a=nobody; other+=("$a"); prev=$a; done
 pw "$PW" | run "${other[@]}" --firstboot-env "$t/fb.env" && fail "a non-owner was accepted"
