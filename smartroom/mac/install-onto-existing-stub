@@ -25,9 +25,10 @@
 #      vendorfw/ and asahi/ back, then omarchy/install.conf (encrypt=0 by
 #      default; omarchy-mac-boot's own switch)
 # --firstboot-env must name an https server. The production server
-# (smartroom.goossen.dev) needs --production, which adds
-# SMARTROOMOS_PRODUCTION=1 to the ESP copy (first boot refuses production
-# without it); --production with another server is refused.
+# (SMARTROOM_PRODUCTION_HOST; empty means no host is special) needs
+# --production, which adds SMARTROOMOS_PRODUCTION=1 to the ESP copy
+# (first boot refuses production without it); --production with another
+# server, or with no host configured, is refused.
 # Without --yes it only checks and prints the plan. It never touches the stub,
 # its boot policy, macOS or any other partition. Blessing is a separate step.
 set -euo pipefail
@@ -35,7 +36,9 @@ PATH=/usr/bin:/bin:/usr/sbin:/sbin
 die() { echo "install-onto-existing-stub: $*" >&2; exit 1; }
 say() { echo "== $*"; }
 zip="" sha="" esp="" esp_uuid="" linux="" bootp="" rootp="" encrypt=0 readback=0 yes=0 fbenv="" production=0
-production_host=smartroom.goossen.dev
+production_host=${SMARTROOM_PRODUCTION_HOST:-}
+production_host=$(printf '%s' "$production_host" | tr -d '\r' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//; s/\.$//')
+production_host=$(printf '%s' "$production_host" | tr '[:upper:]' '[:lower:]')
 while [ $# -gt 0 ]; do
   case $1 in
     --zip) zip=$2; shift ;;
@@ -70,11 +73,14 @@ if [ -n "$fbenv" ]; then
     die "$fbenv has no SMARTROOMOS_SERVER_URL=https://... (plain http is refused: anyone on the path could swap the Room Controller)"
   ! grep -q '^SMARTROOMOS_PRODUCTION=' "$fbenv" || die "$fbenv sets SMARTROOMOS_PRODUCTION; say --production instead"
   host=$(sed -n 's|^SMARTROOMOS_SERVER_URL=https://||p' "$fbenv" | sed 's|[:/].*||; s|\.$||' | tr '[:upper:]' '[:lower:]')
-  if [ "$host" = "$production_host" ] && [ "$production" = 0 ]; then
-    die "$fbenv names the production server ($production_host); say --production"
+  if [ -n "$production_host" ] && [ "$host" = "$production_host" ] && [ "$production" = 0 ]; then
+    die "$fbenv names the production server; say --production"
   fi
-  if [ "$host" != "$production_host" ] && [ "$production" = 1 ]; then
-    die "--production needs the production server ($production_host), not $host"
+  if [ "$production" = 1 ] && [ -z "$production_host" ]; then
+    die "--production needs SMARTROOM_PRODUCTION_HOST"
+  fi
+  if [ "$production" = 1 ] && [ "$host" != "$production_host" ]; then
+    die "--production needs the production server, not $host"
   fi
 fi
 case $encrypt in 0|1) ;; *) die "--encrypt is 0 or 1" ;; esac

@@ -4,6 +4,8 @@
 # the Studio's layout, where diskutil numbers the new Root after Apple's
 # recovery container, a rerun in --boot/--root mode, and the refusals.
 set -euo pipefail
+# A parent shell must not make example.invalid look like production.
+unset SMARTROOM_PRODUCTION_HOST
 here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 t=$(mktemp -d); trap 'rm -rf "$t"' EXIT
 fail() { echo "not ok - $*" >&2; exit 1; }
@@ -92,14 +94,19 @@ grep -q "not a Linux partition" "$t/out" || fail "wrong refusal: $(cat "$t/out")
 echo "ok - refuses the recovery container, a foreign ESP and a wrong digest"
 
 # server trust: https only; the production server only with --production
+export SMARTROOM_PRODUCTION_HOST=rooms.example
 echo "SMARTROOMOS_SERVER_URL=http://example.invalid" >"$t/http.env"
 "$t/install" "${args[@]}" --linux disk0s5 --firstboot-env "$t/http.env" >"$t/out" 2>&1 && fail "an http server URL was accepted"
 grep -q "plain http is refused" "$t/out" || fail "wrong refusal: $(cat "$t/out")"
-echo "SMARTROOMOS_SERVER_URL=https://smartroom.goossen.dev." >"$t/prod.env"
+echo "SMARTROOMOS_SERVER_URL=https://rooms.example." >"$t/prod.env"
 "$t/install" "${args[@]}" --linux disk0s5 --firstboot-env "$t/prod.env" >"$t/out" 2>&1 && fail "production without --production was accepted"
 grep -q "say --production" "$t/out" || fail "wrong refusal: $(cat "$t/out")"
 "$t/install" "${args[@]}" --linux disk0s5 --firstboot-env "$t/fb.env" --production >"$t/out" 2>&1 && fail "--production with a dev server was accepted"
 grep -q "production needs the production server" "$t/out" || fail "wrong refusal: $(cat "$t/out")"
+unset SMARTROOM_PRODUCTION_HOST
+"$t/install" "${args[@]}" --linux disk0s5 --firstboot-env "$t/prod.env" --production >"$t/out" 2>&1 && fail "--production with no host configured was accepted"
+grep -q "needs SMARTROOM_PRODUCTION_HOST" "$t/out" || fail "wrong refusal: $(cat "$t/out")"
+export SMARTROOM_PRODUCTION_HOST=rooms.example
 "$t/install" "${args[@]}" --linux disk0s5 --production >"$t/out" 2>&1 && fail "--production without --firstboot-env was accepted"
 grep -q "production needs --firstboot-env" "$t/out" || fail "wrong refusal: $(cat "$t/out")"
 { cat "$t/prod.env"; echo SMARTROOMOS_PRODUCTION=1; } >"$t/prod-marked.env"
@@ -131,9 +138,9 @@ grep -qx encrypt=1 "$t/vol/disk0s4/omarchy/install.conf" || fail "encrypt=1 not 
 "$t/install" "${args[@]}" --boot disk0s5 --root disk0s6 >"$t/out" 2>&1 && fail "the recovery container accepted as --root"
 echo "ok - rewrites an installed Boot and Root, never the recovery container"
 
-printf 'SMARTROOMOS_SERVER_URL=https://smartroom.goossen.dev' >"$t/prod-nonl.env"
+printf 'SMARTROOMOS_SERVER_URL=https://rooms.example' >"$t/prod-nonl.env"
 "$t/install" "${args[@]}" --boot disk0s5 --root disk0s7 --firstboot-env "$t/prod-nonl.env" --production --yes >"$t/out" 2>&1 ||
   fail "production install failed: $(cat "$t/out")"
-[[ $(cat "$t/vol/disk0s4/asahi/extras/firstboot.env") == $'SMARTROOMOS_SERVER_URL=https://smartroom.goossen.dev\nSMARTROOMOS_PRODUCTION=1' ]] ||
+[[ $(cat "$t/vol/disk0s4/asahi/extras/firstboot.env") == $'SMARTROOMOS_SERVER_URL=https://rooms.example\nSMARTROOMOS_PRODUCTION=1' ]] ||
   fail "--production must add SMARTROOMOS_PRODUCTION=1 on its own line: $(cat "$t/vol/disk0s4/asahi/extras/firstboot.env")"
 echo "ok - --production marks the ESP copy"
