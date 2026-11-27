@@ -6,7 +6,8 @@
 #                     firmware/COMMIT (branch omarchy-base)
 #   authorized_keys   the admin public keys (never a secret; not committed)
 #   overlay-exclude   overlay files the Omarchy base owns (never installed)
-#   release-key.asc   the public key smartroom-release trusts (the package key)
+#   release-key.asc   the production public key smartroom-release trusts
+#   release-key-dev.asc   optional dev public half (never a secret)
 #   build-info        lines for /usr/share/smartroom/build-info
 # It installs our overlay minus overlay-exclude, our first boot, the DHCP
 # client id, then runs our studio setup unchanged in image mode (user, keys,
@@ -62,12 +63,18 @@ printf '[Service]\nEnvironment=SMARTROOM_SNAPSHOT_HELPER=/usr/bin/smartroom-rele
 install -D -m 0755 "$fw/studio-install/firstboot.sh" /usr/local/sbin/smartroom-firstboot
 # smartroom-release checks a release's manifest against this key (the SmartRoom
 # package key, public). Without it a room can only stage an unsigned release.
+# release-key.asc is the production half. release-key-dev.asc, when the build
+# passed one, is the dev half and must be a different key.
 if [[ -f $here/release-key.asc ]]; then
-  gnupghome=$(mktemp -d)
-  install -d -m 0755 /usr/share/smartroom
-  gpg --homedir "$gnupghome" --dearmor <"$here/release-key.asc" >/usr/share/smartroom/release-keyring.gpg
-  chmod 0644 /usr/share/smartroom/release-keyring.gpg
-  rm -rf "$gnupghome"
+  # shellcheck source=/dev/null
+  source "$fw/overlay/usr/local/lib/smartroom/release-lib.sh"
+  declare -F smartroom_install_public_keyring >/dev/null ||
+    { echo "setup: firmware release-lib has no smartroom_install_public_keyring" >&2; exit 1; }
+  smartroom_install_public_keyring "$here/release-key.asc" /usr/share/smartroom/release-keyring.gpg
+  if [[ -f $here/release-key-dev.asc ]]; then
+    smartroom_install_public_keyring "$here/release-key-dev.asc" /usr/share/smartroom/release-keyring-dev.gpg \
+      /usr/share/smartroom/release-keyring.gpg
+  fi
 fi
 # Omarchy's first boot (keyring, deferred hardware setup, the boot rebuild)
 # finishes before ours starts: both make the pacman keyring, and ours ends in

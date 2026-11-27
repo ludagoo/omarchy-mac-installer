@@ -1559,9 +1559,13 @@ build_release_repository() {
   mv "$dir/smartroom-release.db.tar.gz" "$dir/smartroom-release.db"
   python3 "$ROOT/builder/release_repo.py" check-db --records "$dir/PACKAGES" "$dir/smartroom-release.db" 2>>"$logs/release.log" ||
     fail "the release database is not the package record (logs/release.log)"
+  local rel_channel
+  rel_channel=$(release_field channel)
+  [[ $rel_channel == dev || $rel_channel == production ]] ||
+    fail "the release file must name channel=dev or channel=production"
   {
-    printf 'release=%s\nline=studio\nlane=%s\narch=aarch64\nurl=%s\nbuilt=%s\n' \
-      "$(release_field version)" "$lane" "$(release_field url)" "$(date -u +%FT%TZ)"
+    printf 'release=%s\nline=studio\nchannel=%s\nlane=%s\narch=aarch64\nurl=%s\nbuilt=%s\n' \
+      "$(release_field version)" "$rel_channel" "$lane" "$(release_field url)" "$(date -u +%FT%TZ)"
     printf 'builder_commit=%s\nbuilder_image=%s\n' "$MAC_IMAGE_BUILDER_COMMIT" "$MAC_IMAGE_BUILDER_IMAGE"
     printf 'packages=%s\npackage_set_sha256=%s\n' "$(wc -l <"$dir/PACKAGES")" "$(package_set_sha256)"
     printf 'repository_sha256=%s\n' "$(sha256_of "$dir/smartroom-release.db")"

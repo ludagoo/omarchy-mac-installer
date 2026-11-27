@@ -14,19 +14,46 @@
 # [smartroom-release] (the database signed here with the key.fpr key, which
 # never leaves this host), and the room's pacman.conf names only that
 # repository at BASE/VERSION. Publish OUT/release/VERSION there.
-#   --release-version VERSION  default YYYY.MM.DD-studio-LANE (UTC)
+#   --channel dev|production   the release channel (default dev). Not the
+#                              Omarchy lane in the inputs, and not --dev.
+#   --release-version VERSION  default YYYY.MM.DD-studio-<channel> (UTC)
+#   --legacy-id                allow an older name (YYYY.MM.DD-studio-edge)
 #   --release-base BASE        default SMARTROOM_RELEASE_BASE, or
 #                              https://$SMARTROOM_PRODUCTION_HOST/releases.
 #                              A release with neither set is an error.
-#   --dev                      follow the live channel instead (no release)
+#   --dev                      follow the live Omarchy channel (no release)
+#   --defer-channel-sign       the release is signed with the package key now;
+#                              a later job signs it again with the channel key.
+#                              release-check still checks the files and the
+#                              channel line, and skips the channel-key rule.
 set -euo pipefail
 here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 inputs="" recovery="" cache="" packages="" firmware="" keys="" dev=false
-release_version="" release_base=""
+release_version="" release_base="" release_channel=dev legacy_id="" channel_set=0
+defer_sign=0
 firmware_repo=https://github.com/ludagoo/smartroomcontrollerfirmware.git
+
+# Same rule as the firmware's smartroom_release_id_check. This script does
+# not source release-lib.sh (the firmware tree is not here yet).
+release_id_check() {
+  local line=$1 channel=$2 id=$3 legacy=${4-}
+  [[ $channel == dev || $channel == production ]] || { echo "channel must be dev or production: $channel" >&2; return 1; }
+  if [[ -n $legacy ]]; then
+    [[ $id =~ ^[0-9A-Za-z][0-9A-Za-z._-]{0,63}$ ]] || { echo "bad release version: $id" >&2; return 1; }
+    return 0
+  fi
+  [[ $id =~ ^[0-9]{4}\.[0-9]{2}\.[0-9]{2}-(studio|mini)-(dev|production)(-[a-z])?$ ]] ||
+    { echo "release id $id is not YYYY.MM.DD-(studio|mini)-(dev|production)[-x]; --legacy-id allows an old name" >&2; return 1; }
+  [[ ${BASH_REMATCH[1]} == "$line" ]] || { echo "release id $id is not a $line release" >&2; return 1; }
+  [[ ${BASH_REMATCH[2]} == "$channel" ]] || { echo "release id $id says ${BASH_REMATCH[2]}, the channel is $channel" >&2; return 1; }
+}
+
 while (($# > 1)); do
   case $1 in
     --dev) dev=true; shift; continue ;;
+    --legacy-id) legacy_id=1; shift; continue ;;
+    --defer-channel-sign) defer_sign=1; shift; continue ;;
+    --channel) release_channel=$2; channel_set=1 ;;
     --inputs) inputs=$2 ;; --recovery-app) recovery=$2 ;; --cache) cache=$2 ;;
     --packages) packages=$2 ;; --firmware) firmware=$2 ;; --keys) keys=$2 ;;
     --firmware-repo) firmware_repo=$2 ;;
@@ -45,19 +72,23 @@ if [[ -z $release_base && -n ${SMARTROOM_PRODUCTION_HOST:-} ]]; then
   release_base="https://${prod_host}/releases"
 fi
 out=${1:?Usage: see the header}
-[[ -n $inputs && -n $recovery && -n $cache && -d $packages/repo && -n $firmware && -f $keys ]] ||
-  { echo "missing an option (see the header)" >&2; exit 64; }
-[[ ! -e $out ]] || { echo "$out exists" >&2; exit 1; }
-channel=$(sed -n 's/^omarchy_channel=//p' "$inputs")
+# The Omarchy lane (stable, edge, …) stays in the inputs. release_channel is
+# the SmartRoom release channel.
 if $dev; then
-  [[ -z $release_version ]] || { echo "--dev builds no release; drop --release-version" >&2; exit 64; }
+  [[ -z $release_version && -z $legacy_id && $channel_set == 0 && $defer_sign == 0 ]] ||
+    { echo "--dev builds no release; drop --release-version, --channel, --legacy-id and --defer-channel-sign" >&2; exit 64; }
 else
-  release_version=${release_version:-$(date -u +%Y.%m.%d)-studio-${channel:-unknown}}
+  release_version=${release_version:-$(date -u +%Y.%m.%d)-studio-${release_channel}}
+  release_id_check studio "$release_channel" "$release_version" "$legacy_id" || exit 64
   if [[ -z $release_base ]]; then
     echo "no release base: set SMARTROOM_RELEASE_BASE, or SMARTROOM_PRODUCTION_HOST (https://<host>/releases), or pass --release-base" >&2
     exit 64
   fi
 fi
+[[ -n $inputs && -n $recovery && -n $cache && -d $packages/repo && -n $firmware && -f $keys ]] ||
+  { echo "missing an option (see the header)" >&2; exit 64; }
+[[ ! -e $out ]] || { echo "$out exists" >&2; exit 1; }
+omarchy_channel=$(sed -n 's/^omarchy_channel=//p' "$inputs")
 dir=$(mktemp -d); trap 'rm -rf "$dir"' EXIT
 cp -a "$packages/repo" "$dir/repo"
 cp "$packages/key.asc" "$packages/key.fpr" "$dir/"
@@ -67,11 +98,19 @@ install -m 0755 "$here/room/setup-run" "$dir/setup/run"
 cp "$here/room/overlay-exclude" "$here/room/smartroom-wired.nmconnection" "$dir/setup/"
 cp "$keys" "$dir/setup/authorized_keys"
 if ! $dev; then
-  printf 'version=%s\nurl=%s/%s\n' "$release_version" "$release_base" "$release_version" >"$dir/release"
+  printf 'version=%s\nurl=%s/%s\nchannel=%s\n' "$release_version" "$release_base" "$release_version" "$release_channel" >"$dir/release"
   python3 "$here/../image-builder/builder/release_repo.py" check-release "$dir/release" >/dev/null || exit 64
 fi
 # Releases are signed with the SmartRoom package key; the image trusts it for smartroom-release.
+# key.asc stays the production public half. release-key-dev.asc, beside it, is optional.
 cp "$packages/key.asc" "$dir/setup/release-key.asc"
+if [[ -f $packages/release-key-dev.asc ]]; then
+  if gpg --batch --with-colons --show-keys "$packages/release-key-dev.asc" 2>/dev/null | grep -q '^sec'; then
+    echo "release-key-dev.asc holds a secret key" >&2
+    exit 1
+  fi
+  cp "$packages/release-key-dev.asc" "$dir/setup/release-key-dev.asc"
+fi
 git clone -q "$firmware_repo" "$dir/fw"
 git -C "$dir/fw" checkout -q "$firmware"
 firmware=$(git -C "$dir/fw" rev-parse HEAD)
@@ -82,7 +121,7 @@ version=$(date -u +%Y.%m.%d)
 release=$(sed -n 's/^release_tag=//p' "$inputs")
 {
   printf 'built_at=%s\niso_version=%s\nbase=omarchy-mac %s (%s)\n' \
-    "$(date -u +%FT%TZ)" "$version" "${channel:-unknown}" "${release:-no release tag}"
+    "$(date -u +%FT%TZ)" "$version" "${omarchy_channel:-unknown}" "${release:-no release tag}"
   printf 'installer_fork=%s\nfirmware_git=%s\n' "$(git -C "$here" rev-parse HEAD)" "$firmware"
   cat "$packages/SOURCE"
   names=$(bsdtar -xOf "$packages/repo/smartroom.db" '*/desc' | awk '/^%NAME%$/ { getline; print }')
@@ -104,6 +143,8 @@ cd "$here/.."
 image-builder/bin/build-mac-image --inputs "$inputs" --recovery-app "$recovery" --cache "$cache" --smartroom "$dir" "$out"
 cp "$dir/setup/build-info" "$out/build-info.txt"
 if ! $dev; then
-  "$here/release-check" "$out/release/$release_version" "$(<"$packages/key.fpr")" "$packages/key.asc"
+  check_defer=()
+  [[ $defer_sign == 0 ]] || check_defer=(defer)
+  "$here/release-check" "$out/release/$release_version" "$(<"$packages/key.fpr")" "$packages/key.asc" "$release_channel" "${check_defer[@]}"
   echo "Release $release_version: publish $out/release/$release_version at $release_base/$release_version"
 fi

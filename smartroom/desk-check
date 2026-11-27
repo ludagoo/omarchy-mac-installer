@@ -277,6 +277,15 @@ sys.exit(open(sys.argv[2], "rb").read() not in open(sys.argv[1], "rb").read())' 
   check "smartroom-release installed" test -x "$m/usr/bin/smartroom-release"
   check "smartroom-release health service enabled at sysinit" test -L "$m/usr/lib/systemd/system/sysinit.target.wants/smartroom-release-health.service" -o -L "$m/etc/systemd/system/sysinit.target.wants/smartroom-release-health.service"
   check "smartroom-release trusts the release key" test -s "$m/usr/share/smartroom/release-keyring.gpg"
+  devkr=$m/usr/share/smartroom/release-keyring-dev.gpg
+  if [[ -e $devkr || -L $devkr ]]; then
+    check "dev release keyring differs from production" bash -c '
+      prod=$(gpg --batch --with-colons --show-keys "$1" 2>/dev/null | awk -F: '\''$1 == "fpr" { print $10; exit }'\'')
+      dev=$(gpg --batch --with-colons --show-keys "$2" 2>/dev/null | awk -F: '\''$1 == "fpr" { print $10; exit }'\'')
+      [[ -n $prod && -n $dev && $prod != "$dev" ]]
+    ' _ "$m/usr/share/smartroom/release-keyring.gpg" "$devkr"
+    check "dev release keyring is mode 0644" test "$(stat -c %a "$devkr")" = 644
+  fi
   check "smartroom-release carries the room's identity" grep -qx '/var/lib/smartroom' "$m/usr/share/smartroom/release-carry.list"
   check "Room Controller helper is smartroom-release" grep -qx 'Environment=SMARTROOM_SNAPSHOT_HELPER=/usr/bin/smartroom-release' "$m/etc/systemd/system/smartroom-agent.service.d/snapshot-helper.conf"
   for f in usr/local/sbin/smartroom-snapshot usr/local/bin/smartroom-snapshot usr/local/sbin/smartroom-boot-try \

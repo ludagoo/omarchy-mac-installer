@@ -9,7 +9,10 @@ grep -qx 'smartroom-release[[:space:]].*' "$here/room/packages" || grep -qx 'sma
   || fail "room/packages must install smartroom-release"
 grep -q 'packages=(.*smartroom-release' "$here/build-packages" || fail "build-packages must build smartroom-release"
 grep -q 'release-key.asc' "$here/build-image" || fail "build-image must hand the release key to the room setup"
+grep -q 'release-key-dev.asc' "$here/build-image" || fail "build-image must hand the optional dev release key to the room setup"
 grep -q 'release-keyring.gpg' "$here/room/setup-run" || fail "setup-run must install the release keyring"
+grep -q 'release-keyring-dev.gpg' "$here/room/setup-run" || fail "setup-run must install the dev release keyring"
+grep -q 'smartroom_install_public_keyring' "$here/room/setup-run" || fail "setup-run must install keyrings through release-lib"
 grep -q 'SMARTROOM_SNAPSHOT_HELPER=/usr/bin/smartroom-release' "$here/room/setup-run" \
   || fail "setup-run must point the Room Controller at smartroom-release"
 # The pin is written before the studio setup, whose product contract requires it.
@@ -17,7 +20,8 @@ pin=$(grep -n 'SMARTROOM_SNAPSHOT_HELPER=/usr/bin/smartroom-release' "$here/room
 run=$(grep -n 'bin/smartroom-studio-setup"$' "$here/room/setup-run" | tail -n1 | cut -d: -f1)
 ((pin < run)) || fail "the helper pin must be written before smartroom-studio-setup runs"
 for want in 'smartroom-release installed' 'Room Controller helper is smartroom-release' 'Mini snapshot/update tool absent' \
-            'smartroom-release trusts the release key'; do
+            'smartroom-release trusts the release key' 'dev release keyring differs from production' \
+            'dev release keyring is mode 0644'; do
   grep -q "$want" "$here/desk-check" || fail "desk-check must assert: $want"
 done
 
