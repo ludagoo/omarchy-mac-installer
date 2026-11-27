@@ -12,6 +12,9 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
+echo "test-ci: workflows"
+bash "$ROOT/test/workflows.sh"
+
 as_root() {
   if [[ $EUID -eq 0 ]]; then
     "$@"

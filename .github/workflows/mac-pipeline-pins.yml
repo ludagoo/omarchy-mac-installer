@@ -17,8 +17,6 @@ name: Mac pipeline pins
 # report on the branch's head commit, where the required checks look.
 
 on:
-  release:
-    types: [published]
   workflow_dispatch:
     inputs:
       tag:

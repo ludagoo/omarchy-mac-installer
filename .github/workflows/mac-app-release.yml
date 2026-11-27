@@ -1,12 +1,11 @@
 name: Mac app release
 
-# A pushed v<version> tag builds the installer app, signs it with the Developer
-# ID in the macos-release environment (a second maintainer approves; self-review
-# blocked, no admin bypass), notarizes and staples it into a .dmg, and leaves
-# the .dmg on a draft release v<version> that is never marked latest. A
-# dispatch defaults to an ad hoc dry run that needs no secrets and publishes
-# nothing. Packaging/release/plan decides and refuses everything else; pull
-# requests never trigger this workflow.
+# Manual only. Builds the installer app, signs it with the Developer ID in the
+# macos-release environment (a second maintainer approves; self-review blocked,
+# no admin bypass), notarizes and staples it into a .dmg, and leaves the .dmg
+# on a draft release that is never marked latest. A dispatch defaults to an
+# ad hoc dry run that needs no secrets and publishes nothing.
+# Packaging/release/plan decides and refuses everything else.
 #
 # Jobs: plan, engine and build hold no secrets. Only the sign job can read the
 # certificate and notary key; it installs nothing, runs no package manager and
@@ -15,8 +14,6 @@ name: Mac app release
 # an approved, real sign job, and only for a v* tag.
 
 on:
-  push:
-    tags: ['v*']
   workflow_dispatch:
     inputs:
       dry-run:
