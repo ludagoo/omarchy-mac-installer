@@ -11,7 +11,7 @@
 #   build-info        lines for /usr/share/smartroom/build-info
 # It installs our overlay minus overlay-exclude, our first boot, the DHCP
 # client id, then runs our studio setup unchanged in image mode (user, keys,
-# sshd, greetd, America/Chicago, units). Packages are already installed.
+# sshd, greetd, the room timezone, units). Packages are already installed.
 set -euo pipefail
 here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 fw=$here/firmware
