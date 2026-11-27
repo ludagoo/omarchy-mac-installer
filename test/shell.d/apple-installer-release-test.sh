@@ -348,10 +348,9 @@ fi
 
 # ── the workflow's security invariants ─────────────────────────────────────
 triggers=$(awk '/^on:/{on=1; next} on && /^[^ ]/{exit} on && /^  [a-z_]+:/{sub(/:.*/, ""); print $1}' "$workflow")
-[[ $triggers == $'push\nworkflow_dispatch' ]] || fail "the workflow runs only for pushes (v* tags) and dispatches" "$triggers"
-push=$(awk '/^  push:/{p=1; next} p && /^  [a-z_]+:/{exit} p && !/^ *#/' "$workflow")
-[[ $push == "    tags: ['v*']" ]] || fail "pushes run only for v* tags" "$push"
-pass "pull requests cannot trigger the release workflow"
+[[ $triggers == workflow_dispatch ]] || fail "the workflow runs only on workflow_dispatch" "$triggers"
+[[ $triggers != *pull_request_target* ]] || fail "pull_request_target must not trigger the release" "$triggers"
+pass "the release workflow is dispatch-only"
 
 # Each job's lines, keyed by job id.
 job_of() {

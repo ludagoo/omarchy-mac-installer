@@ -1,14 +1,10 @@
 name: SmartRoom checks
 
-# The fork's shipped branches (smartroom/main stable, smartroom/edge edge) and
-# their fix branches run the suites they carry: image-builder/test/all and
-# smartroom/test/all. No secrets: read-only checkout, public repositories only.
-# The boot leaves the SmartRoom tests exercise come from ludagoo/omarchy-mac-pkgs
-# at the same line (PKGS_REF), checked out beside this repository.
+# Manual only. image-builder/test/all and smartroom/test/all. No secrets:
+# read-only checkout, public repositories only. The boot leaves come from
+# ludagoo/omarchy-mac-pkgs at PKGS_REF, checked out beside this repository.
 
 on:
-  push:
-    branches: [smartroom/main, smartroom/edge, 'fix/**']
   workflow_dispatch:
 
 permissions:

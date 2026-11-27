@@ -1,8 +1,8 @@
 name: Edge publish filter
 
-# omacom/omarchy-pkgs' publish job sends repository_dispatch edge-mac-changed
-# after it publishes aarch64 packages into edge, naming them in
-# client_payload.packages. This decides whether any of them is a package the
+# A dispatch carries the publish payload as the payload input (the same JSON
+# a repository_dispatch client_payload used: packages, database_sha256,
+# source). This decides whether any of them is a package the
 # Mac image installs (image-builder/bin/edge-dispatch-filter: the channel set,
 # the builder's own packages, the edge runtime's package lists and their
 # dependencies, resolved in the repository order the runtime's Apple pacman
@@ -12,13 +12,16 @@ name: Edge publish filter
 # approves. An unrelated publish ends here, successfully. This workflow builds
 # nothing at all.
 #
-# A repository_dispatch run always uses the default branch's workflow and
-# code, so a payload can never choose what runs. The payload is read only
-# from the event file, never interpolated into a script.
+# The payload is an input, read only from the event file, never interpolated
+# into a script. It cannot choose which workflow file runs.
 
 on:
-  repository_dispatch:
-    types: [edge-mac-changed]
+  workflow_dispatch:
+    inputs:
+      payload:
+        description: JSON object with packages, database_sha256 and source
+        type: string
+        required: true
 
 permissions: {}
 
@@ -54,7 +57,7 @@ jobs:
           WORK=$RUNNER_TEMP/edge-filter
           echo "WORK=$WORK" >>"$GITHUB_ENV"
           mkdir -p "$WORK"
-          jq '.client_payload' "$GITHUB_EVENT_PATH" >"$WORK/payload.json"
+          jq 'if .inputs.payload then (.inputs.payload | fromjson) else .client_payload end' "$GITHUB_EVENT_PATH" >"$WORK/payload.json"
           jq -c '{packages: [.packages[]? | "\(.name) \(.version)"], database_sha256, source}' "$WORK/payload.json"
 
       - name: Fetch the edge database, the runtime and the other repositories

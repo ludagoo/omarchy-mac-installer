@@ -250,10 +250,10 @@ class Workflow(unittest.TestCase):
     def setUp(self) -> None:
         self.text = job_lines(WORKFLOW)
 
-    def test_published_releases_and_dispatches_start_it_and_nothing_else(self):
+    def test_dispatches_start_it_and_nothing_else(self):
         on = self.text.split("\non:\n", 1)[1].split("\n\n", 1)[0]
-        self.assertEqual(re.findall(r"^  ([a-z_]+):", on, re.M), ["release", "workflow_dispatch"])
-        self.assertIn("    types: [published]", on)
+        self.assertEqual(re.findall(r"^  ([a-z_]+):", on, re.M), ["workflow_dispatch"])
+        self.assertNotIn("pull_request_target", on)
 
     def test_it_holds_only_what_a_pull_request_needs(self):
         self.assertIn("\npermissions: {}\n", self.text)
