@@ -1,26 +1,31 @@
 #!/bin/bash
 # Check a SmartRoom release directory before it is published:
-#   smartroom/release-check DIR FINGERPRINT KEY.ASC CHANNEL
+#   smartroom/release-check DIR FINGERPRINT KEY.ASC CHANNEL [defer]
 # DIR (OUT/release/VERSION of smartroom/build-image) must hold the database,
 # PACKAGES and RELEASE with good signatures by FINGERPRINT (KEY.ASC its public
 # key), every archive PACKAGES names with its sha256 and a signature, and a
 # database that lists exactly PACKAGES. CHANNEL is dev or production. RELEASE
 # must record that channel. Production must be the production fingerprint;
-# dev must not be.
+# dev must not be. defer skips only that fingerprint rule: the build signs
+# with its own key, and a later job signs again with the channel key.
 set -euo pipefail
 here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 dir=${1:?Usage: smartroom/release-check DIR FINGERPRINT KEY.ASC CHANNEL}
 key=${2:?Usage: smartroom/release-check DIR FINGERPRINT KEY.ASC CHANNEL}
 asc=${3:?Usage: smartroom/release-check DIR FINGERPRINT KEY.ASC CHANNEL}
-channel=${4:?Usage: smartroom/release-check DIR FINGERPRINT KEY.ASC CHANNEL}
+channel=${4:?Usage: smartroom/release-check DIR FINGERPRINT KEY.ASC CHANNEL [defer]}
+defer=${5-}
 fail() { echo "release-check: $*" >&2; exit 1; }
 # The production release key. Dev signatures must be some other key.
 production_fpr=26436A50BDD17118770DE9185FDA1532DC448891
 [[ $channel == dev || $channel == production ]] || fail "channel must be dev or production: $channel"
-if [[ $channel == production ]]; then
-  [[ $key == "$production_fpr" ]] || fail "production must be signed by $production_fpr, not $key"
-else
-  [[ $key != "$production_fpr" ]] || fail "dev must not be signed by the production key"
+[[ -z $defer || $defer == defer ]] || fail "the fifth argument is defer or nothing"
+if [[ $defer != defer ]]; then
+  if [[ $channel == production ]]; then
+    [[ $key == "$production_fpr" ]] || fail "production must be signed by $production_fpr, not $key"
+  else
+    [[ $key != "$production_fpr" ]] || fail "dev must not be signed by the production key"
+  fi
 fi
 asc_fpr=$(gpg --batch --with-colons --show-keys "$asc" 2>/dev/null | awk -F: '$1 == "fpr" { print $10; exit }')
 [[ $asc_fpr == "$key" ]] || fail "$asc is ${asc_fpr:-not a public key}, not $key"

@@ -98,6 +98,8 @@ refuse_build 'not YYYY.MM.DD' --release-version 2026.11.27-studio-dev-bb
 refuse_build 'not YYYY.MM.DD' --release-version 2026.11.20-studio-edge
 refuse_build 'channel must be dev or production' --channel edge --release-version 2026.11.27-studio-edge
 refuse_build 'builds no release' --dev --channel dev
+refuse_build 'builds no release' --dev --defer-channel-sign
+grep -q -- '--defer-channel-sign) defer_sign=1' "$here/../build-image" || bad "build-image has --defer-channel-sign"
 refuse_build 'builds no release' --dev --release-version 2026.11.27-studio-dev --legacy-id
 if cli_err --legacy-id --release-version 2026.11.20-studio-edge; then bad "--legacy-id must still need the rest of the options"; fi
 grep -q 'missing an option' "$s/cli.err" || bad "--legacy-id did not reach the option check: $(<"$s/cli.err")"
@@ -207,12 +209,20 @@ if "$here/../release-check" "$dir" "$key" "$smartroom_dir/key.asc" production >/
   bad "release-check accepts a throwaway key as production"
 fi
 grep -q "production must be signed by $prod_fpr" "$s/ch.err" || bad "production names the production key: $(<"$s/ch.err")"
+# defer skips the fingerprint rule and still rejects a channel mismatch.
+if "$here/../release-check" "$dir" "$key" "$smartroom_dir/key.asc" production defer >/dev/null 2>"$s/ch.err"; then
+  bad "defer accepts a RELEASE whose channel is not production"
+fi
+grep -q 'RELEASE channel is not production' "$s/ch.err" || bad "defer still checks the channel line: $(<"$s/ch.err")"
+grep -q 'production must be signed' "$s/ch.err" && bad "defer still applied the fingerprint rule"
 if "$here/../release-check" "$dir" "$prod_fpr" "$smartroom_dir/key.asc" dev >/dev/null 2>"$s/ch.err"; then
   bad "release-check accepts the production fingerprint on dev"
 fi
 grep -q 'dev must not be signed by the production key' "$s/ch.err" || bad "dev refuses the production key: $(<"$s/ch.err")"
 sed -i 's/^channel=dev$/channel=production/' "$dir/RELEASE"
 sign_release "$dir" RELEASE
+"$here/../release-check" "$dir" "$key" "$smartroom_dir/key.asc" production defer >/dev/null \
+  || bad "defer accepts the package key when the channel line is production"
 if "$here/../release-check" "$dir" "$key" "$smartroom_dir/key.asc" dev >/dev/null 2>"$s/ch.err"; then
   bad "release-check accepts a RELEASE whose channel is production"
 fi

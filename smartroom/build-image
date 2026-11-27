@@ -22,10 +22,15 @@
 #                              https://$SMARTROOM_PRODUCTION_HOST/releases.
 #                              A release with neither set is an error.
 #   --dev                      follow the live Omarchy channel (no release)
+#   --defer-channel-sign       the release is signed with the package key now;
+#                              a later job signs it again with the channel key.
+#                              release-check still checks the files and the
+#                              channel line, and skips the channel-key rule.
 set -euo pipefail
 here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 inputs="" recovery="" cache="" packages="" firmware="" keys="" dev=false
 release_version="" release_base="" release_channel=dev legacy_id="" channel_set=0
+defer_sign=0
 firmware_repo=https://github.com/ludagoo/smartroomcontrollerfirmware.git
 
 # Same rule as the firmware's smartroom_release_id_check. This script does
@@ -47,6 +52,7 @@ while (($# > 1)); do
   case $1 in
     --dev) dev=true; shift; continue ;;
     --legacy-id) legacy_id=1; shift; continue ;;
+    --defer-channel-sign) defer_sign=1; shift; continue ;;
     --channel) release_channel=$2; channel_set=1 ;;
     --inputs) inputs=$2 ;; --recovery-app) recovery=$2 ;; --cache) cache=$2 ;;
     --packages) packages=$2 ;; --firmware) firmware=$2 ;; --keys) keys=$2 ;;
@@ -69,8 +75,8 @@ out=${1:?Usage: see the header}
 # The Omarchy lane (stable, edge, …) stays in the inputs. release_channel is
 # the SmartRoom release channel.
 if $dev; then
-  [[ -z $release_version && -z $legacy_id && $channel_set == 0 ]] ||
-    { echo "--dev builds no release; drop --release-version, --channel and --legacy-id" >&2; exit 64; }
+  [[ -z $release_version && -z $legacy_id && $channel_set == 0 && $defer_sign == 0 ]] ||
+    { echo "--dev builds no release; drop --release-version, --channel, --legacy-id and --defer-channel-sign" >&2; exit 64; }
 else
   release_version=${release_version:-$(date -u +%Y.%m.%d)-studio-${release_channel}}
   release_id_check studio "$release_channel" "$release_version" "$legacy_id" || exit 64
@@ -137,6 +143,8 @@ cd "$here/.."
 image-builder/bin/build-mac-image --inputs "$inputs" --recovery-app "$recovery" --cache "$cache" --smartroom "$dir" "$out"
 cp "$dir/setup/build-info" "$out/build-info.txt"
 if ! $dev; then
-  "$here/release-check" "$out/release/$release_version" "$(<"$packages/key.fpr")" "$packages/key.asc" "$release_channel"
+  check_defer=()
+  [[ $defer_sign == 0 ]] || check_defer=(defer)
+  "$here/release-check" "$out/release/$release_version" "$(<"$packages/key.fpr")" "$packages/key.asc" "$release_channel" "${check_defer[@]}"
   echo "Release $release_version: publish $out/release/$release_version at $release_base/$release_version"
 fi
