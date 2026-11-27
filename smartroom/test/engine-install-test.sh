@@ -360,8 +360,9 @@ pw "$PW" | run "${common[@]}" --firstboot-env "$t/bad.env" && fail "a firstboot.
 grep -q "SMARTROOM_AGENT_INSTALL_SHA256" "$t/out" || fail "wrong refusal: $(tail -3 "$t/out")"
 pw "$PW" | CONSOLE_USER="" "$ei" "${common[@]}" --firstboot-env "$t/fb.env" >"$t/out" 2>&1 && fail "ran with no console user"
 grep -q "no user is logged in at this Mac's console" "$t/out" || fail "wrong refusal: $(tail -3 "$t/out")"
-# Only the --owner value changes: a ${common[@]/lucas/nobody} would also rewrite every path that contains
-# "lucas" (a scratch dir under a home of that name), and the run would stop at "missing --payload" instead.
+# Only the --owner value changes. Substituting that owner token across the
+# whole argument list would also rewrite every path that contains it (a scratch
+# dir under a home of that name), and the run would stop at "missing --payload" instead.
 other=(); prev=""
 for a in "${common[@]}"; do [[ $prev == --owner ]] && a=nobody; other+=("$a"); prev=$a; done
 pw "$PW" | run "${other[@]}" --firstboot-env "$t/fb.env" && fail "a non-owner was accepted"
