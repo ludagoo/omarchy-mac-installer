@@ -217,6 +217,11 @@ sys.exit(open(sys.argv[2], "rb").read() not in open(sys.argv[1], "rb").read())' 
   check "wired profile is root's, mode 0600 (NetworkManager ignores it otherwise)" test "$(stat -c '%u:%g %a' "$nm" 2>/dev/null)" = "0:0 600"
   check "wired profile: [ethernet] accept-all-mac-addresses=1" \
     test "$(awk '/^\[/ { s = $0 } s == "[ethernet]" && $0 == "accept-all-mac-addresses=1" { print "yes" }' "$nm" 2>/dev/null)" = yes
+  # The room's network camera: the module for this kernel and the firmware's drop-ins.
+  while IFS= read -r line; do
+    echo "$line"
+    [[ $line == FAIL* ]] && fails=$((fails + 1))
+  done < <(bash "$(dirname -- "${BASH_SOURCE[0]}")/network-camera-check" root "$m" "$kver")
   # The room comes back after a power cut: the Studio's power-on policy is set at every boot.
   while IFS= read -r line; do
     echo "$line"

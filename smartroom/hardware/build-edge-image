@@ -1,7 +1,7 @@
 #!/bin/bash
 # SmartRoom edge image from pinned commits of the installer, packages and firmware repos, on studio-build
-# (ARM builds happen only there). Steps: aura, linux-aurora and mesa-aurora (with vulkan-aurora) built
-# into boot-pkgs; the SmartRoom repo (smartroom/build-packages); the image (smartroom/build-image);
+# (ARM builds happen only there). Steps: aura, linux-aurora, mesa-aurora (with vulkan-aurora) and the
+# network camera module v4l2loopback-aurora built into boot-pkgs; the SmartRoom repo (smartroom/build-packages); the image (smartroom/build-image);
 # smartroom/desk-check on the result. Every commit is pinned at the start, so a branch moving during
 # the run cannot mix. Needs on studio-build: docker, sudo -n, ~/build.lock, the package signing key
 # (~/omarchy-fork/pkg-key.fpr), the recovery app, the omarchy-fork cache, and a firmware bundle.
@@ -91,6 +91,18 @@ build_one() {
 build_one aura
 build_one linux-aurora
 build_one mesa-aurora
+# The network camera module, for exactly the kernel above: against its headers
+# unpacked here (not installed); --nodeps because its depends is that kernel.
+if [[ -d $recipe/v4l2loopback-aurora ]]; then
+  hdr=$(mktemp -d -p "$W")
+  bsdtar -C "$hdr" -xf "$(ls "$BOOT"/linux-aurora-headers-[0-9]*.pkg.tar.zst)" usr/lib/modules
+  rm -rf "$W/src-v4l2loopback-aurora"
+  cp -a "$recipe/v4l2loopback-aurora" "$W/src-v4l2loopback-aurora"
+  phase "makepkg v4l2loopback-aurora"
+  (cd "$W/src-v4l2loopback-aurora" && AURORA_KERNEL_BUILD_DIR=$(echo "$hdr"/usr/lib/modules/*/build) PKGDEST="$BOOT" \
+    makepkg --config "$W/makepkg.conf" --nodeps --force --cleanbuild --noconfirm --sign --key "$KEY")
+  rm -rf "$hdr"
+fi
 ls -l "$BOOT" | tee -a "$W/phase"
 
 phase "check boot packages"

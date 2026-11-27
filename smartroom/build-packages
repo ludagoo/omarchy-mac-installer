@@ -60,6 +60,26 @@ for pkg in "${packages[@]}"; do
   (cd "$src/$pkg" && SMARTROOM_MAC_PKGS_COMMIT=$commit SMARTROOM_MAC_PKGS_DATE=$date \
     PKGDEST="$out/repo" makepkg --force --cleanbuild --syncdeps --noconfirm --sign --key "$key")
 done
+# The network camera module (v4l2loopback-aurora) is built for exactly the kernel
+# in this repo: against that kernel's headers, unpacked here, never installed on
+# this host. --nodeps: its depends is that same kernel, which this host does not run.
+if [[ -d $src/pkgs/smartroom/pkgbuilds/v4l2loopback-aurora ]]; then
+  if [[ -z ${SMARTROOM_EDGE_BOOT_PACKAGES:-} ]]; then
+    shopt -s nullglob
+    headers=("$out"/repo/linux-aurora-headers-[0-9]*.pkg.tar.zst "$out"/repo/linux-aurora-headers-[0-9]*.pkg.tar.xz)
+    shopt -u nullglob
+    (( ${#headers[@]} == 1 )) || { echo "expected one linux-aurora-headers package in $out/repo" >&2; exit 1; }
+    mkdir -p "$src/headers"
+    bsdtar -C "$src/headers" -xf "${headers[0]}" usr/lib/modules
+    kdir=$(echo "$src"/headers/usr/lib/modules/*/build)
+    [[ -f $kdir/version ]] || { echo "${headers[0]##*/} has no build tree" >&2; exit 1; }
+    cp -a "$src/pkgs/smartroom/pkgbuilds/v4l2loopback-aurora" "$src/v4l2loopback-aurora"
+    (cd "$src/v4l2loopback-aurora" && AURORA_KERNEL_BUILD_DIR=$kdir \
+      PKGDEST="$out/repo" makepkg --nodeps --force --cleanbuild --noconfirm --sign --key "$key")
+  fi
+  "$here/network-camera-check" repo "$out/repo" ||
+    { echo "the repository has no v4l2loopback-aurora for its linux-aurora (SMARTROOM_EDGE_BOOT_PACKAGES must carry one built for it)" >&2; exit 1; }
+fi
 if grep -Eq '^[0-9a-f]{64} ' "$here/room/prebuilt.sha256"; then
   [[ -d ${SMARTROOM_ROOM_PACKAGES:-} ]] ||
     { echo "set SMARTROOM_ROOM_PACKAGES to the directory with the files room/prebuilt.sha256 pins" >&2; exit 1; }
