@@ -2214,7 +2214,9 @@ container_main() {
   [[ $(sha256_of "$ROOT/builder/omarchy-volume.icns") == "$ICON_SHA256" ]] || fail "the volume icon changed"
   [[ -f "$candidates/import.json" ]] || fail "the candidate set was not imported"
   mkdir -p "$logs"
-  trap 'cleanup; cp -r "$logs" /out/' EXIT
+  # /out is the runner's workspace. Docker is root, and a root-owned file there
+  # makes the next checkout unable to clean the self-hosted workspace.
+  trap 'cleanup; cp -r "$logs" /out/; chown -R "${MAC_IMAGE_HOST_UID:-0}:${MAC_IMAGE_HOST_GID:-0}" /out' EXIT
   make_loop_nodes
   run_interruptible build_payload
 }
