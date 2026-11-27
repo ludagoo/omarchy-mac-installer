@@ -1166,6 +1166,29 @@ pass "the runtime installs the reviewed Mesa and Vulkan"
 ) || fail "the SmartRoom runtime does not install aura with linux-aurora"
 pass "the SmartRoom runtime installs aura with linux-aurora"
 
+# aurora-scripts is already installed with aura. The Apple set must name that
+# package, not asahi-scripts, or pacman asks to remove aurora-scripts.
+(
+  profile=smartroom
+  work=$scratch/apple-aura
+  candidates=$scratch/apple-aura-candidates
+  mkdir -p "$work" "$candidates" "$scratch/logs"
+  printf 'aura\n' >"$work/smartroom-names"
+  printf '%s\n' '{"packages":[]}' >"$candidates/import.json"
+  apple_names=()
+  mount_api() { :; }
+  unmount_api() { :; }
+  pacman() { printf 'aurora-scripts 20261023-1\n'; }
+  target_pacman() { printf '%s\n' "$*" >"$scratch/apple-aura-transaction"; }
+  install_apple_set
+  txn=$(<"$scratch/apple-aura-transaction")
+  [[ $txn == *" aurora-scripts "* || $txn == *" aurora-scripts" ]] || exit 1
+  [[ $txn != *"asahi-scripts"* ]] || exit 1
+  profile=
+  [[ $(platform_targets | paste -sd' ' -) == "mkinitcpio limine limine-snapper-sync asahi-scripts asahi-fwextract" ]]
+) || fail "the SmartRoom Apple set still names asahi-scripts after aura installed aurora-scripts"
+pass "the SmartRoom Apple set names aurora-scripts, not asahi-scripts"
+
 # The container starts without python3; the inputs check (channel_set.py lane)
 # runs only once the toolchain is in place.
 ! declare -f container_main | grep -q 'mac-image-inputs" check' ||

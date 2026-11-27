@@ -953,6 +953,21 @@ available_base() {
   printf '%s\n' "${unavailable[@]}" >"$work/unavailable"
 }
 
+# Names the Apple transaction installs from PLATFORM_PACKAGES. aura's
+# aurora-scripts replaces asahi-scripts and is already installed with the
+# runtime. Naming asahi-scripts again asks pacman to remove aurora-scripts.
+platform_targets() {
+  local name
+  for name in "${PLATFORM_PACKAGES[@]}"; do
+    if [[ $name == asahi-scripts && $profile == smartroom && -f $work/smartroom-names ]] &&
+      grep -Fxq aura "$work/smartroom-names"; then
+      printf 'aurora-scripts\n'
+      continue
+    fi
+    printf '%s\n' "$name"
+  done
+}
+
 # The whole package set, resolved against the pinned databases before anything
 # installs: every candidate comes from [omarchy-candidates], no refused package
 # is pulled in, and the set resolves at all.
@@ -964,7 +979,7 @@ precheck_transaction() {
       "$candidates/import.json" >/dev/null || fail "Aurora support package is missing: $name"
   done
   available_base
-  resolved=$(target_pacman -Sp --print-format '%r %n %v' "${BOOTSTRAP[@]}" "${PLATFORM_PACKAGES[@]}" \
+  resolved=$(target_pacman -Sp --print-format '%r %n %v' "${BOOTSTRAP[@]}" $(platform_targets) \
     $(runtime_roles) "${base_names[@]}" $(qualified "${APPLE_AUDIO[@]}") \
     $(qualified "${apple_names[@]}" $(candidate_names boot) $(candidate_names support)) 2>>"$logs/precheck.log") ||
     fail "the package set does not resolve against the pinned databases (logs/precheck.log)"
@@ -1146,7 +1161,7 @@ install_runtime() {
 install_apple_set() {
   local installed name version
   mount_api
-  target_pacman -S $(qualified "${apple_names[@]}" $(candidate_names boot) $(candidate_names support)) "${PLATFORM_PACKAGES[@]}" \
+  target_pacman -S $(qualified "${apple_names[@]}" $(candidate_names boot) $(candidate_names support)) $(platform_targets) \
     $(qualified "${APPLE_AUDIO[@]}") >>"$logs/install.log" 2>&1 || fail "could not install the Apple set (logs/install.log)"
   unmount_api
   installed=$(pacman --dbpath "$target/var/lib/pacman" -Q)
