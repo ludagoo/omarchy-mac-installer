@@ -1126,13 +1126,19 @@ require_build_identity() {
 }
 
 install_runtime() {
-  local graphics=()
+  local graphics=() boot=()
   # The reviewed Aurora Mesa must be a target here: it then satisfies the
   # desktop's mesa dependency, so stock mesa never installs. The Apple set
   # cannot replace it later without answering a conflict prompt.
+  # aura is the same shape. linux-aurora depends on m1n1, and aura conflicts
+  # with that package without replacing it. A later transaction stops at the
+  # prompt. aura has to be a target here so the stock package never installs.
   mapfile -t graphics < <(qualified mesa-aurora vulkan-aurora)
+  if [[ $profile == smartroom && -f $work/smartroom-names ]] && grep -Fxq aura "$work/smartroom-names"; then
+    mapfile -t boot < <(qualified m1n1-aurora)
+  fi
   mount_api
-  target_pacman -S $([[ $profile == smartroom ]] || qualified omarchy) "${base_names[@]}" "${graphics[@]}" >>"$logs/install.log" 2>&1 ||
+  target_pacman -S $([[ $profile == smartroom ]] || qualified omarchy) "${base_names[@]}" "${graphics[@]}" "${boot[@]}" >>"$logs/install.log" 2>&1 ||
     fail "could not install the runtime (logs/install.log)"
   unmount_api
 }
