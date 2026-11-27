@@ -1144,6 +1144,28 @@ pass "base and Apple runtime requests use the reviewed Mesa, Vulkan and bless pa
 ) || fail "the runtime transaction does not carry the reviewed Mesa"
 pass "the runtime installs the reviewed Mesa and Vulkan"
 
+# linux-aurora depends on m1n1. aura conflicts with that package and does not
+# replace it, so the SmartRoom runtime has to install aura in the same
+# transaction. The Apple set then finds aura already installed.
+(
+  profile=smartroom
+  work=$scratch/runtime-aura
+  candidates=$scratch/runtime-aura-candidates
+  mkdir -p "$work" "$candidates" "$scratch/logs"
+  printf 'aura\nlinux-aurora\n' >"$work/smartroom-names"
+  printf '%s\n' '{"packages":[{"name":"mesa-aurora"},{"name":"vulkan-aurora"}]}' >"$candidates/import.json"
+  mount_api() { :; }
+  unmount_api() { :; }
+  target_pacman() { printf '%s\n' "$*" >"$scratch/runtime-aura-transaction"; }
+  base_names=(smartroom/linux-aurora)
+  install_runtime
+  [[ $(<"$scratch/runtime-aura-transaction") == "-S smartroom/linux-aurora omarchy-candidates/mesa-aurora omarchy-candidates/vulkan-aurora smartroom/aura" ]]
+  profile=
+  install_runtime
+  [[ $(<"$scratch/runtime-aura-transaction") == "-S omarchy smartroom/linux-aurora omarchy-candidates/mesa-aurora omarchy-candidates/vulkan-aurora" ]]
+) || fail "the SmartRoom runtime does not install aura with linux-aurora"
+pass "the SmartRoom runtime installs aura with linux-aurora"
+
 # The container starts without python3; the inputs check (channel_set.py lane)
 # runs only once the toolchain is in place.
 ! declare -f container_main | grep -q 'mac-image-inputs" check' ||
