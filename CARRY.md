@@ -210,6 +210,16 @@ not the kernel's `aurora` GPU driver. The process is in the pkgs `CARRY.md`
 does not open `aurora`. Drop it when Omarchy's edge channel publishes a Mesa
 that does.
 
+`v4l2loopback-aurora` (pkgs `smartroom/pkgbuilds/v4l2loopback-aurora`) is the
+room's network camera: one loopback device, `/dev/video30` "Network camera",
+that the Room Controller feeds from an RTSP camera and Chromium lists as a
+webcam (the firmware's `etc/modprobe.d/smartroom-network-camera.conf`). It is
+built for exactly the `linux-aurora` in the same repository, against that
+kernel's headers (`build-packages`, `hardware/build-edge-image`).
+`smartroom/network-camera-check` makes `build-packages` stop on a module built
+for another kernel, and `desk-check` fail on an image without the module, its
+`vermagic`, the drop-ins, or the Room Controller user in `video`.
+
 "Start up after a power failure": a Studio sets it itself at every boot
 (`smartroom-ac-power.service` in the firmware repo); `smartroom/ac-power-check`
 makes `desk-check` fail if the unit, its Studio-only condition or the kernel's

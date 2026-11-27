@@ -1,0 +1,85 @@
+#!/bin/bash
+# The room's network camera (one v4l2loopback device the Room Controller feeds
+# from an RTSP camera, Chromium lists it as a webcam): what a release must carry.
+#   smartroom/network-camera-check repo DIR        packages build-packages wrote
+#   smartroom/network-camera-check root ROOT KVER  an image root (desk-check)
+# repo: v4l2loopback-aurora is there, built for the linux-aurora beside it
+# (its depends names that exact version).
+# root: the package is installed, its module is under KVER with KVER's vermagic
+# and in modules.dep, the firmware's modprobe and modules-load drop-ins are there
+# (root's, 0644, devices=1 video_nr=30 card_label="Network camera"
+# exclusive_caps=1), no other drop-in sets v4l2loopback options, and the Room
+# Controller user is in the video group (udev makes video4linux nodes root:video 0660).
+# Prints PASS/FAIL lines; exits non-zero on any FAIL.
+set -uo pipefail
+package=v4l2loopback-aurora kernel=linux-aurora user=smartroomcontroller
+fails=0
+pass() { echo "PASS $*"; }
+failed() { echo "FAIL $*"; fails=$((fails + 1)); }
+check() { local what=$1; shift; if "$@" >/dev/null 2>&1; then pass "$what"; else failed "$what"; fi; }
+usage() { echo "Usage: smartroom/network-camera-check repo DIR | root ROOT KVER" >&2; exit 64; }
+# NAME FILE...: the pkgver-pkgrel of the archive of package NAME among FILE.
+archive_version() {
+  local name=$1 f info
+  shift
+  for f in "$@"; do
+    info=$(bsdtar -xOf "$f" .PKGINFO 2>/dev/null) || continue
+    grep -qx "pkgname = $name" <<<"$info" || continue
+    sed -n 's/^pkgver = //p' <<<"$info"
+    return 0
+  done
+  return 1
+}
+# The first word of a module's vermagic (the kernel release it loads into).
+module_release() {
+  local reader=cat
+  case $1 in *.zst) reader="zstd -dc" ;; *.xz) reader="xz -dc" ;; *.gz) reader="gzip -dc" ;; esac
+  $reader "$1" 2>/dev/null | strings -a | sed -n 's/^vermagic=\([^ ]*\) .*/\1/p' | head -n 1
+}
+
+case ${1:-} in
+  repo)
+    dir=${2:-}
+    [[ -d $dir ]] || usage
+    shopt -s nullglob
+    archives=()
+    for f in "$dir"/*.pkg.tar.*; do [[ $f == *.sig ]] || archives+=("$f"); done
+    shopt -u nullglob
+    module=$(archive_version "$package" "${archives[@]}")
+    kernel_version=$(archive_version "$kernel" "${archives[@]}")
+    check "network camera: $package is in the repository" test -n "$module"
+    want="depend = $kernel=$kernel_version"
+    for f in "${archives[@]}"; do
+      bsdtar -xOf "$f" .PKGINFO 2>/dev/null | grep -qx "pkgname = $package" || continue
+      check "network camera: $package ${module:-?} is built for $kernel ${kernel_version:-?} (rebuild it for every kernel build)" \
+        bash -c '[[ -n $2 ]] && bsdtar -xOf "$1" .PKGINFO | grep -qxF "$3"' _ "$f" "$kernel_version" "$want"
+    done
+    ;;
+  root)
+    m=${2:-} kver=${3:-}
+    [[ -d $m && -n $kver ]] || usage
+    check "network camera: $package installed" test -n "$(ls -d "$m/var/lib/pacman/local/$package"-[0-9]* 2>/dev/null)"
+    ko=$(ls "$m/usr/lib/modules/$kver"/extra/v4l2loopback.ko* 2>/dev/null | head -n 1)
+    release=""
+    [[ -z $ko ]] || release=$(module_release "$ko")
+    check "network camera: v4l2loopback module for $kver (vermagic ${release:-missing})" test -n "$ko" -a "$release" = "$kver"
+    check "network camera: depmod lists the module (modules.dep)" grep -q '^extra/v4l2loopback\.ko[^:]*:' "$m/usr/lib/modules/$kver/modules.dep"
+    conf=$m/etc/modprobe.d/smartroom-network-camera.conf
+    load=$m/etc/modules-load.d/smartroom-network-camera.conf
+    options=$(grep -E '^[[:space:]]*options[[:space:]]+v4l2loopback[[:space:]]' "$conf" 2>/dev/null)
+    for word in devices=1 video_nr=30 'card_label="Network camera"' exclusive_caps=1; do
+      check "network camera: modprobe drop-in sets $word" bash -c '[[ " $1 " == *" $2 "* ]]' _ "$options" "$word"
+    done
+    check "network camera: modules-load drop-in loads v4l2loopback at boot" grep -qx 'v4l2loopback' "$load"
+    for f in "$conf" "$load"; do
+      check "network camera: ${f#"$m"} is root's, 0644" test "$(stat -c '%u:%g %a' "$f" 2>/dev/null)" = "0:0 644"
+    done
+    others=$(grep -lE '^[[:space:]]*options[[:space:]]+v4l2loopback([[:space:]]|$)' \
+      "$m"/etc/modprobe.d/*.conf "$m"/usr/lib/modprobe.d/*.conf 2>/dev/null | grep -vxF "$conf")
+    check "network camera: no other modprobe drop-in sets v4l2loopback options${others:+ (${others//"$m"/})}" test -z "$others"
+    check "network camera: $user is in the video group (writes /dev/video30)" \
+      awk -F: -v u="$user" '$1 == "video" { n = split($4, m, ","); for (i = 1; i <= n; i++) if (m[i] == u) f = 1 } END { exit !f }' "$m/etc/group"
+    ;;
+  *) usage ;;
+esac
+exit $(( fails > 0 ))
