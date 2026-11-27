@@ -17,6 +17,21 @@ cleanup() {
   umount -R "$bootchk/m" 2>/dev/null || true
   umount -R "$m" 2>/dev/null || true
   umount "$ro" 2>/dev/null || true
+  # systemd-run leaves this tree owned by root. The runner cannot clean it,
+  # and the next checkout dies on it.
+  if [[ -n ${SUDO_USER:-} && $SUDO_USER != root ]]; then
+    chown -R -- "$SUDO_USER:" "$work" || true
+  fi
+}
+# A Mac host's device tree names that machine's ESP. Cover it so the boot
+# check reads the image's /boot/efi instead of mounting the host disk.
+cover_host_device_tree() {
+  local root=$1 dir
+  for dir in "$root/sys/firmware/devicetree" "$root/proc/device-tree"; do
+    [[ -d $dir && ! -L $dir ]] || continue
+    mountpoint -q "$dir" && continue
+    mount -t tmpfs -o nosuid,nodev,mode=755 dt "$dir" || return 1
+  done
 }
 trap cleanup EXIT
 [[ -f $work/x/root.img ]] || bsdtar -xf "$zip" -C "$work/x" root.img boot.img esp || exit 1
@@ -32,6 +47,7 @@ for d in proc sys dev run tmp; do
     *) mount -t tmpfs "$d" "$m/$d" ;;
   esac
 done
+cover_host_device_tree "$m" || { echo "could not hide the host device tree" >&2; exit 1; }
 fails=0
 pass() { echo "PASS $*"; }
 failed() { echo "FAIL $*"; fails=$((fails + 1)); }
@@ -57,6 +73,7 @@ if [[ ! -d $m/etc/pacman.d/gnupg ]]; then
       *) mount -t tmpfs "$d" "$bootchk/m/$d" ;;
     esac
   done
+  cover_host_device_tree "$bootchk/m" || { echo "could not hide the host device tree" >&2; exit 1; }
   keyrings=(archlinuxarm asahi-alarm)
   [[ ! -f $bootchk/m/usr/share/pacman/keyrings/omarchy.gpg ]] || keyrings+=(omarchy)
   [[ ! -f $bootchk/m/usr/share/pacman/keyrings/smartroom.gpg ]] || keyrings+=(smartroom)
@@ -276,7 +293,8 @@ sys.exit(open(sys.argv[2], "rb").read() not in open(sys.argv[1], "rb").read())' 
   check "SmartRoom first boot enabled" test -L "$wants/smartroom-firstboot.service"
   check "SmartRoom first boot runs after Omarchy's" grep -q 'After=omarchy-mac-first-boot.service' "$m/etc/systemd/system/smartroom-firstboot.service.d/10-after-omarchy-first-boot.conf"
   check "omarchy-mac-first-boot enabled" test -L "$wants/omarchy-mac-first-boot.service"
-  check "timezone America/Chicago" test "$(readlink "$m/etc/localtime" | sed 's|^\.\./|/|')" = /usr/share/zoneinfo/America/Chicago
+  # smartroom_room_timezone, default UTC. A release build does not set SMARTROOM_TIMEZONE.
+  check "timezone UTC" test "$(readlink "$m/etc/localtime" | sed 's|^\.\./|/|')" = /usr/share/zoneinfo/UTC
   check "snapshots left to Omarchy" test -e "$m/etc/smartroom/omarchy-base"
   # Updates and rollback: smartroom-release (aura-try), not the Mini's snapshot tools.
   check "smartroom-release installed" test -x "$m/usr/bin/smartroom-release"

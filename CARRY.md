@@ -185,7 +185,7 @@ is overwritten. Our room files that replace someone else's:
   `/etc/locale.gen` (glibc: en_US.UTF-8, as the builder also sets);
 - files Omarchy's builder writes (`builder/finalize-root`): `/etc/locale.conf`
   (identical), `/etc/vconsole.conf` (`KEYMAP=us`, the builder's has the same
-  keymap plus XKB lines), `/etc/localtime` (America/Chicago instead of UTC).
+  keymap plus XKB lines), `/etc/localtime` (UTC, the room timezone default).
 
 Two of Omarchy's *settings* are set by the image instead of the installer
 app: `TARGET_OS_NAME` in `/etc/default/limine` (kept by our omarchy-mac-boot
