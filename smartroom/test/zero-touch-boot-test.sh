@@ -177,7 +177,7 @@ grep -Eq '^ *cmdline:.*panic=10([[:space:]]|$)' "$esp/limine.conf" ||
   fail "the rebuilt UKI command line has no panic=10 ($(grep cmdline "$esp/limine.conf"))"
 echo "ok - the rebuilt limine.conf has no checksum and the UKI line has panic=10"
 
-# --- Never wait at boot (SmartRoom Firmware WS1): the builder's own functions, run on a scratch root.
+# --- Never wait at boot (zero-touch boot): the builder's own functions, run on a scratch root.
 fns=$(sed -n '/^SMARTROOM_SAFETY_CMDLINE=/p; /^grub_default_has_word() {/,/^}/p; /^add_safety_words() {/,/^}/p; /^force_zero_wait() {/,/^}/p' "$builder")
 [[ $fns == *force_zero_wait* && $fns == *add_safety_words* ]] || fail "the builder lost add_safety_words or force_zero_wait"
 sandbox() { # sandbox 'commands': the functions, profile=smartroom, a scratch target

@@ -3,7 +3,7 @@
 After `engine-install`, the tech starts the Mac into 1TR and picks
 "SmartRoom Firmware". Recovery then opens the native Recovery app that the
 image carries in `esp/aurora/recovery/` (the Engine copies it unchanged to the
-stub). Upstream it is "Omarchy Installer"; on `smartroom/main` it says
+stub). Upstream it is "Omarchy Installer"; on `smartroom/edge` it says
 SmartRoom Firmware everywhere a tech can see it or hear it with VoiceOver.
 
 ## What changed
@@ -109,11 +109,9 @@ sudo rm /tmp/.com.apple.dt.CommandLineTools.installondemand.in-progress
 
 ## Screens
 
-`smartroom/mac/build-recovery-app --screens` writes these; the set for
-release-3 (app manifest `56ab72cb…`) is in
-`~/smartroom-omarchy-fork/release/smartroom-3/screens/` on the Mini, with
-`before-after-01.png` (upstream and SmartRoom side by side, same 780 × 440
-window).
+`smartroom/mac/build-recovery-app --screens OUT` writes these to
+`OUT/screens`, with `before-after-01.png` (upstream and SmartRoom side by
+side, same 780 × 440 window).
 
 | File | Screen |
 | --- | --- |

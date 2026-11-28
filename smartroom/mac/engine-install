@@ -103,8 +103,8 @@ else
       die "$fbenv needs exactly one SMARTROOM_SERVER_URL line"
     grep -Eq '^SMARTROOM_SERVER_URL=https://[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9.])?(:[0-9]{1,5})?(/[^[:space:]]*)?$' "$fbenv" ||
       die "$fbenv has no SMARTROOM_SERVER_URL=https://... (plain http is refused: anyone on the path could swap the Room Controller)"
-    grep -Eq '^SMARTROOM_AGENT_INSTALL_SHA256=[0-9a-fA-F]{64}$' "$fbenv" ||
-      die "$fbenv has no SMARTROOM_AGENT_INSTALL_SHA256=<64 hex digits>"
+    grep -Eq '^SMARTROOM_CONTROLLER_INSTALL_SHA256=[0-9a-fA-F]{64}$' "$fbenv" ||
+      die "$fbenv has no SMARTROOM_CONTROLLER_INSTALL_SHA256=<64 hex digits>"
     ! grep -q '^SMARTROOM_PRODUCTION=' "$fbenv" ||
       die "$fbenv sets SMARTROOM_PRODUCTION; say --production instead"
     host=$(sed -n 's|^SMARTROOM_SERVER_URL=https://||p' "$fbenv" | sed 's|[:/].*||; s|\.$||' | tr '[:upper:]' '[:lower:]')

@@ -248,7 +248,7 @@ PY
 PAY="$t/pkg/smartroomcontrollerfirmware-mini-x86_64.zip"
 IDATA="$t/pkg/installer_data.json"
 PSHA=$(sha256sum "$PAY" | awk '{print $1}')
-printf 'SMARTROOM_SERVER_URL=https://rooms.example.invalid\nSMARTROOM_AGENT_INSTALL_SHA256=%064d\n' 0 >"$t/fb.env"
+printf 'SMARTROOM_SERVER_URL=https://rooms.example.invalid\nSMARTROOM_CONTROLLER_INSTALL_SHA256=%064d\n' 0 >"$t/fb.env"
 
 reset_state() {
   python3 - "$FAKE_STATE" "${1:-normal}" <<'PY'
@@ -325,7 +325,7 @@ PY
   rm -f "$t/pmset.state" "$t/pmset.log"
 }
 
-# 1. Pre-flight refusals (F7/F20): zero disk mutations
+# 1. Pre-flight refusals: zero disk mutations
 reset_state_clean normal
 FAKE_MODEL=MacBookPro16,1 "$t/mi" --payload "$PAY" --sha256 "$PSHA" --installer-data "$IDATA" --firstboot-env "$t/fb.env" >"$t/out" 2>&1 && fail "wrong model accepted"
 grep -q "expected Macmini8,1" "$t/out" || fail "wrong model error: $(cat "$t/out")"
@@ -341,8 +341,8 @@ python3 -c 'import json,sys; s=json.load(open(sys.argv[1])); s["nvram_str"]["94b
 grep -q "No Security" "$t/out" || fail "wrong T2 security error: $(cat "$t/out")"
 
 reset_state_clean existing
-"$t/mi" --payload "$PAY" --sha256 "$PSHA" --installer-data "$IDATA" --firstboot-env "$t/fb.env" --yes >"$t/out" 2>&1 && fail "existing install accepted (F20)"
-grep -q "run remove-firmware first" "$t/out" || fail "wrong F20 error: $(cat "$t/out")"
+"$t/mi" --payload "$PAY" --sha256 "$PSHA" --installer-data "$IDATA" --firstboot-env "$t/fb.env" --yes >"$t/out" 2>&1 && fail "existing install accepted"
+grep -q "run remove-firmware first" "$t/out" || fail "wrong existing-install error: $(cat "$t/out")"
 ! grep -q '^MUTATE' "$FAKE_LOG" || fail "refusal mutated disk: $(cat "$FAKE_LOG")"
 echo "ok - preflight refuses wrong model, SIP on, firmware password, T2 Medium/Full Security, and existing install without touching disk"
 
@@ -358,7 +358,7 @@ grep -q "pmset -a autorestart 1 and read it back (now '0')" "$t/out" || fail "dr
 ! grep -qvx -- '-g' "$t/pmset.log" || fail "dry run called pmset with more than -g: $(cat "$t/pmset.log")"
 echo "ok - dry-run plans 'pmset -a autorestart 1' (read back) and does not change it"
 
-# 2b. The power-cut setting (WS7/F9): set from macOS before any disk change, read back, refuse if it does not stick
+# 2b. The power-cut setting: set from macOS before any disk change, read back, refuse if it does not stick
 for mode in fail nostick; do
   reset_state_clean normal
   if [[ $mode == fail ]]; then export PMSET_FAIL=1; else export PMSET_STICK=0; fi

@@ -9,8 +9,8 @@ Put SmartRoom Firmware beside macOS. macOS keeps a volume. SmartRoom Firmware is
 | `smartroom/mac/engine-install` | Shrinks macOS and installs the image. See [engine-headless.md](engine-headless.md). |
 | `smartroom/mac/smartroom-boot-os` | Switches the default between SmartRoom Firmware and macOS. |
 | `smartroom/mac/remove-firmware` | Removes the SmartRoom Firmware container. |
-| `smartroom/hardware/build-edge-image` | Builds an image. The one to install is the one whose desk-check passed. |
-| [cold-boot-checks.md](cold-boot-checks.md) | The build recipe and the three cold-boot checks. |
+| Firmware `release-dev` workflow | Builds and checks the image. Install only a published release (its `desk-check` passed). |
+| [cold-boot-checks.md](cold-boot-checks.md) | The three cold-boot checks. |
 | [recovery-app.md](recovery-app.md) | The recovery app branded for the image. |
 
 ## Disk split
@@ -32,4 +32,4 @@ Remote Login for the admin account is on before a remote install. FileVault, a f
 
 ## After install
 
-First boot reads `firstboot.env` from the ESP (`SMARTROOM_SERVER_URL`, https only, and `SMARTROOM_AGENT_INSTALL_SHA256`). A production server needs `--production` on `engine-install`, which sets `SMARTROOM_PRODUCTION=1`. The room registers as pending until ops adopts it.
+First boot reads `firstboot.env` from the ESP (`SMARTROOM_SERVER_URL`, https only, and `SMARTROOM_CONTROLLER_INSTALL_SHA256`). A production server needs `--production` on `engine-install`, which sets `SMARTROOM_PRODUCTION=1`. The room registers as pending until ops adopts it.

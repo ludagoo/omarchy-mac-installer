@@ -1,6 +1,6 @@
 #!/bin/bash
-# smartroom/hardware/*: the Studio cold-boot test helpers, against fake ssh, systemctl, systemd-run,
-# nmcli, ip and logger. Nothing here touches a real machine.
+# smartroom/hardware/studio-netsim: the cold-boot check B helper, against fake systemctl,
+# systemd-run, nmcli, ip and logger. Nothing here touches a real machine.
 set -euo pipefail
 here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 hw=$here/../hardware
@@ -42,19 +42,4 @@ grep -q "ConditionPathExists=$t/state/netsim-armed" "$t/studio-netsim.service" &
 ns remove
 [[ ! -e $t/studio-netsim.service ]] && ok "remove deletes the unit" || bad "remove"
 
-# oneshot reboot: lock, hold, bless commands, outcome codes
-printf '#!/bin/bash\necho "ssh $*" >>"%s/ssh.calls"\ncase "$*" in *"echo up"*) echo up;; esac\nexit 0\n' "$t" >"$t/bin/ssh"
-chmod +x "$t/bin/ssh"
-run() { env STUDIO_SETTLE=0 STUDIO_LOCK="$t/lock" STUDIO_HOLD="$t/hold" "$@" bash "$hw/studio-oneshot-reboot" 20; }
-rc=0; run >/dev/null 2>&1 || rc=$?; [[ $rc == 3 ]] && ok "no lock: refuses (exit 3)" || bad "no lock gave $rc"
-: >"$t/lock"; : >"$t/hold"
-rc=0; run >/dev/null 2>&1 || rc=$?; [[ $rc == 3 ]] && ok "HOLD file: refuses (exit 3)" || bad "hold gave $rc"
-rm "$t/hold"; : >"$t/ssh.calls"
-rc=0; run >"$t/out" 2>&1 || rc=$?
-[[ $rc == 0 ]] && grep -q 'aurora-bless --set-boot-macos --yes' "$t/ssh.calls" && grep -q 'aurora-bless --next --set-boot "SmartRoom Firmware" --yes' "$t/ssh.calls" &&
-  grep -q 'systemctl reboot' "$t/ssh.calls" && ok "clean reboot: macOS stays default, Linux is a one-shot, then reboot" || bad "reboot path (rc $rc): $(cat "$t/ssh.calls" "$t/out")"
-: >"$t/ssh.calls"
-rc=0; run STUDIO_CRASH=1 >"$t/out" 2>&1 || rc=$?
-[[ $rc == 0 ]] && grep -q 'panic=10' "$t/ssh.calls" && grep -q 'sysrq-trigger' "$t/ssh.calls" && ! grep -q 'systemctl reboot' "$t/ssh.calls" &&
-  ok "crash mode checks panic=10, re-arms the one-shot, then sysrq c" || bad "crash path (rc $rc): $(cat "$t/ssh.calls" "$t/out")"
 exit $fail

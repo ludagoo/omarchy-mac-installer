@@ -1,5 +1,13 @@
 # Apple installer development
 
+## SmartRoom
+
+Work on `smartroom/` and `CARRY.md`. Rooms build from `smartroom/edge`.
+The Room Controller unit is `smartroom-controller.service` and its tree is
+`/opt/smartroom/room-controller`. Do not put site names in this fork. Do not
+add an AI attribution trailer. Run `smartroom/test/all` for a change under
+`smartroom/`. The rest of this file is the upstream installer guide.
+
 ## Goal autonomy
 
 During an active goal, choose and implement the best reversible local source,

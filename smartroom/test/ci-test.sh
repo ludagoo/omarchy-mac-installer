@@ -1,11 +1,11 @@
 #!/bin/bash
-# The SmartRoom CI workflow guards the shipped branches with the suites the
-# fork carries, and runs without secrets or write access.
+# The fork's check workflow runs bin/test-ci.sh (the fork's suites), by hand
+# only, without secrets or write access.
 set -euo pipefail
 here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-wf=$here/../../.github/workflows/smartroom-ci.yml
+wf=$here/../../.github/workflows/check.yml
 bad() { echo "FAIL ci: $*" >&2; exit 1; }
-[[ -f $wf ]] || bad "no .github/workflows/smartroom-ci.yml"
+[[ -f $wf ]] || bad "no .github/workflows/check.yml"
 python3 - "$wf" <<'PY' || bad "the workflow is not workflow_dispatch only"
 import re, sys
 text = open(sys.argv[1]).read()
@@ -20,7 +20,5 @@ grep -qx '  contents: read' "$wf" || bad "the workflow reads only"
 ! grep -q 'persist-credentials: true' "$wf" && [[ $(grep -c 'persist-credentials: false' "$wf") == "$(grep -c 'actions/checkout@' "$wf")" ]] ||
   bad "no checkout keeps credentials"
 ! grep -E 'uses: [^ ]+@' "$wf" | grep -vqE '@[0-9a-f]{40} ' || bad "every action is pinned to a commit"
-grep -q 'bash image-builder/test/all' "$wf" && grep -q 'bash omarchy-mac-installer/smartroom/test/all' "$wf" ||
-  bad "the workflow runs image-builder/test/all and smartroom/test/all"
-grep -qE '^  PKGS_REF: smartroom/(main|edge)$' "$wf" || bad "the boot leaves come from a SmartRoom pkgs line"
-echo "ok - smartroom-ci.yml runs the fork's suites on workflow_dispatch without secrets"
+grep -q 'bash bin/test-ci.sh' "$wf" || bad "the workflow runs bin/test-ci.sh"
+echo "ok - check.yml runs bin/test-ci.sh on workflow_dispatch without secrets"

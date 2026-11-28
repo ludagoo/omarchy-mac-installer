@@ -1,8 +1,13 @@
 # SmartRoom carry on omarchy-mac-installer
 
+Rooms build from `smartroom/edge`. The Room Controller on an installed room
+is `/opt/smartroom/room-controller` (`smartroom-controller.service`). A
+release moves a package that already has the new name off the previous
+paths. `smartroom/main` is not the line rooms build from.
+
 `smartroom/edge` (this branch) is `smartroom/main` at `ea01d43` plus the edge
-boot chain. `smartroom/main` stays the stable line: m1n1-aurora, kernel 7.2,
-the smartroom-3 image. Do not merge this branch back into `smartroom/main`.
+boot chain (m1n1-aurora, kernel 7.2, the smartroom-3 image, then the edge
+boot chain). Do not merge this branch back into `smartroom/main`.
 
 On this branch the SmartRoom image is built from the Omarchy **edge** channel,
 not stable. The channel's published edge database (2026-11-18) is still kernel
@@ -139,7 +144,7 @@ Omarchy's Chromium, the room package list and the room's own files.
 | --- | --- | --- | --- | --- |
 | 1 | `CARRY.md`, `smartroom/sync-upstream.sh` | This file and the sync script | No (ours) | Never |
 | 2 | `image-builder`: `build-mac-image --smartroom DIR` (one profile switch; every hunk is `profile == smartroom`), plus `mac-image-check payload --os-name` and the `smartroom` profile, `finalize-root --headless`, `package_record.py --local-repository/--not-installed` | Builds the headless image from the same stable channel record as Omarchy's: no `omarchy`/`omarchy-settings`/desktop lists; our `omarchy-mac-boot` and `smartroom-omarchy-helpers` from a signed local repo; `omarchy-apply-system` replaced by the two runtime steps the boot chain needs (`install/config/snapper.sh`, the hardware deferral with `platform-setup.sh`, both the runtime's own code); no owner provisioning, Plymouth splash or display manager; the room layer runs as `setup/run` before the initramfs; the picker/stub/Limine name is "SmartRoom Firmware"; the ESP carries `omarchy/install.conf` `encrypt=0`; `/etc/limine-entry-tool.d/zz-smartroom-firmware.conf` sets `ENABLE_VERIFICATION=no` (limine-entry-tool loads that directory after `/etc/limine-entry-tool.conf`, which ships `yes`, and before `/etc/default/limine`), so `limine.conf` has no file checksums. It cannot live in `/etc/default/limine`: first boot's `limine-boot.sh` rewrites that file and keeps only `TARGET_OS_NAME`. `GRUB_CMDLINE_LINUX_DEFAULT` gains `panic=10` (reboot 10s after a kernel panic); `grub-console.sh` rewrites `GRUB_CMDLINE_LINUX` only, and `omarchy-mac-limine-cmdline` copies the default line into the UKI command line, including when first boot derives it again (on 2026-11-18 the Studio's kernel file changed after its checksum was written, and Limine 12.9.3 stopped at "Press Y to continue" with no screen or keyboard: `uri_hash_mismatch()` waits for a key when `hash_mismatch_panic: no` and panics to a prompt when `yes`). The setup tree is handed to root (`chown -R 0:0`) as it enters the image root: it comes from the host's build user (uid 1000, which is the room's own user in the image). The Omarchy release inspection (which holds the desktop runtime) is skipped for this profile; `smartroom/desk-check` and omarchy-mac-boot's own `omarchy-apple-silicon-boot-check` check the boot chain instead. The stock build is unchanged (the builder's own `image-builder/test/all` passes). **Never wait at boot (SmartRoom Firmware WS1):** `GRUB_CMDLINE_LINUX_DEFAULT` also gains `oops=panic softlockup_panic=1 systemd.watchdog_sec=30` (the list is the firmware's `smartroom_boot_safety_cmdline`; `zero-touch-boot-test.sh` compares them), and `force_zero_wait` sets `timeout: 0` in the ESP `limine.conf` right after the Limine activation and refuses a file checksum, so no menu can wait for a key (Omarchy's template says `timeout: 1`). `smartroom/room/overlay-exclude` now supports `!path` (re-include; last match wins) and puts back the panic/watchdog sysctls, the systemd watchdog drop-in and the mkinitcpio safety-hook drop-in; the integrity check, `smartroom-rollback` and their units come with the overlay. `desk-check` checks all of it. | Partly: "build-mac-image: a headless profile without the desktop runtime" could be offered to omacom as a draft once rooms prove it | omacom ships a headless profile |
-| 3 | `smartroom/`: `room/` (package list, Apple-list drops, overlay exclusions, the AQC113 wired profile, `setup-run`), the update and rollback wiring (`smartroom-release` in `room/packages`, the Room Controller's helper pin and the release keyring written by `setup-run`, the Mini's snapshot and update tools in `room/overlay-exclude`, `desk-check` assertions, `test/release-wiring-test.sh`), `build-packages`, `build-image`, `desk-check`, `release-pack`, `ac-power-check`, `hardware/` (the Studio cold-boot helpers and `build-edge-image`), `recovery-branding`, `mac/engine-install`, `mac/mini-install`, `mac/remove-firmware`, `mac/smartroom-boot-os`, `mac/install-onto-existing-stub`, `mac/build-recovery-app`, `test/` (+ `docs/`, among them `install-zoom-room.md`, `cold-boot-checks.md` and `recovery-app.md`) | Our layer and tooling only; nothing upstream reads it. `mac/mini-install`, `mac/remove-firmware` (`x86_64`), and `mac/smartroom-boot-os` (`x86_64`) extend the partition-based macOS dual-boot flow to 2018 Intel T2 Mac minis (`Macmini8,1`) | No (ours) | Never |
+| 3 | `smartroom/`: `room/` (package list, Apple-list drops, overlay exclusions, the AQC113 wired profile, `setup-run`), the update and rollback wiring (`smartroom-release` in `room/packages`, the Room Controller's helper pin and the release keyring written by `setup-run`, the Mini's snapshot and update tools in `room/overlay-exclude`, `desk-check` assertions, `test/release-wiring-test.sh`), `build-packages`, `build-image`, `desk-check`, `release-pack`, `ac-power-check`, `hardware/` (the Studio cold-boot helpers), `recovery-branding`, `mac/engine-install`, `mac/mini-install`, `mac/remove-firmware`, `mac/smartroom-boot-os`, `mac/install-onto-existing-stub`, `mac/build-recovery-app`, `test/` (+ `docs/`, among them `install-zoom-room.md`, `cold-boot-checks.md` and `recovery-app.md`) | Our layer and tooling only; nothing upstream reads it. `mac/mini-install`, `mac/remove-firmware` (`x86_64`), and `mac/smartroom-boot-os` (`x86_64`) extend the partition-based macOS dual-boot flow to 2018 Intel T2 Mac minis (`Macmini8,1`) | No (ours) | Never |
 | 4 | `Recovery/`: SmartRoom Firmware branding of the native Recovery app that 1TR runs ("Finish setup"). Three new files: `Sources/SmartRoomBrand.swift` (every shown name), `Sources/SmartRoomWordmark.swift` (the banner, same 400 × 94 frame), `Sources/SmartRoomSnapshots.swift` (preview builds only: `--smartroom-snapshots DIR` saves every screen). One-line hunks: the shown strings in `main.swift`, `InstallerView.swift`, `EnrollmentGate.swift`, `AuthorizationPrompt.swift`, `RecoveryActions.swift`, `RecoveryOwner.swift`, `Account/RecoveryAccountCore.swift` (the recovery account's full name), the preview hook in `main.swift`; `CFBundleName` in `build-app.sh` and `Resources/en.lproj/InfoPlist.strings`; `build-app.sh` puts the MIT `LICENSE` in the bundle; `test-all.sh` compiles `SmartRoomBrand.swift` into each fixture; `Tests/AuthorizationPromptCheck.swift` expects the new prompt. Layout, sizes, colours and flow are upstream's. | Techs installing a room see this app in 1TR (and hear it with VoiceOver); it must say SmartRoom Firmware, not Omarchy. Kept on purpose, because the pinned Engine (`omarchy_recovery.validate_source`), the image builder (`recovery_app.py`) and the stub layout match on them and none is drawn: the bundle `<INSTALLER_RECOVERY_APP_NAME>.app`, its `CFBundleDisplayName` (Engine contract, see [recovery-app.md](smartroom/docs/recovery-app.md#what-still-says-omarchy)), the executable `OmarchyRecovery`, the bundle identifier, `OmarchyRecoveryBuildMode`, the `Omarchy*` type names and the `Aurora/`/`omarchy-*` paths. | Partly: "make the Recovery app's product name a build setting" (one constant, and the Engine reading the display name from the manifest instead of a literal) | omacom makes the Recovery app's name configurable |
 
 ### Studio updates (smartroom-release)
@@ -198,10 +203,11 @@ as stock Omarchy's desktop setup does.
 
 ### The edge image and the power-on policy
 
-The image to install is the one desk-check passed. Rebuild with
-`smartroom/hardware/build-edge-image`. Do not install an image from before
-the zero-touch fixes (Limine checksums on, or `panic=10` missing). Checks:
-`smartroom/docs/cold-boot-checks.md`.
+The image to install is a published release, built and checked by the
+firmware repository's release workflows (`build-packages`, `build-image`,
+`desk-check`, `release-check`). `desk-check` fails an image from before the
+zero-touch fixes (Limine checksums on, or `panic=10` missing). Cold-boot
+checks: `smartroom/docs/cold-boot-checks.md`.
 
 `mesa-aurora` and `vulkan-aurora` (pkgs `smartroom/pkgbuilds/mesa-aurora`,
 recipe `23791c1`) are carried because the channel's Mesa opens only `asahi`,
@@ -215,7 +221,7 @@ room's network camera: one loopback device, `/dev/video30` "Network camera",
 that the Room Controller feeds from an RTSP camera and Chromium lists as a
 webcam (the firmware's `etc/modprobe.d/smartroom-network-camera.conf`). It is
 built for exactly the `linux-aurora` in the same repository, against that
-kernel's headers (`build-packages`, `hardware/build-edge-image`).
+kernel's headers (`build-packages`).
 `smartroom/network-camera-check` makes `build-packages` stop on a module built
 for another kernel, and `desk-check` fail on an image without the module, its
 `vermagic`, the drop-ins, or the Room Controller user in `video`.
@@ -244,7 +250,6 @@ smartroom/build-image --inputs INPUTS --recovery-app REC --cache CACHE --package
 sudo smartroom/desk-check OUT/*.zip WORKDIR
 sudo smartroom/release-pack OUT/*.zip REL/ID --id ID --work WORKDIR \
   --sign-key <fpr> --key-asc PKGS/key.asc --source-info firmware=<sha> ...         # the Studio's smartroom-release release
-smartroom/hardware/build-edge-image INSTALLER_SHA PKGS_SHA FIRMWARE_SHA   # the edge image, pinned, end to end
 bash smartroom/test/all                                                                   # our tools' tests
 ```
 

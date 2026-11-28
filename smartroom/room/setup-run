@@ -9,9 +9,9 @@
 #   release-key.asc   the production public key smartroom-release trusts
 #   release-key-dev.asc   optional dev public half (never a secret)
 #   build-info        lines for /usr/share/smartroom/build-info
-# It installs our overlay minus overlay-exclude, our first boot, the DHCP
-# client id, then runs our studio setup unchanged in image mode (user, keys,
-# sshd, greetd, the room timezone, units). Packages are already installed.
+# It installs our overlay minus overlay-exclude (our first boot is in it), the
+# DHCP client id, then runs our studio setup unchanged in image mode (user,
+# keys, sshd, greetd, the room timezone, units). Packages are already installed.
 set -euo pipefail
 here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 fw=$here/firmware
@@ -57,10 +57,9 @@ install -d -m 0755 /etc/smartroom
 # The Room Controller's update and rollback helper is smartroom-release (the Mini's
 # snapshot tool is in overlay-exclude). Written before the studio setup, whose
 # product contract requires this pin on an Omarchy-base image.
-install -d -m 0755 /etc/systemd/system/smartroom-agent.service.d
+install -d -m 0755 /etc/systemd/system/smartroom-controller.service.d
 printf '[Service]\nEnvironment=SMARTROOM_SNAPSHOT_HELPER=/usr/bin/smartroom-release\n' \
-  >/etc/systemd/system/smartroom-agent.service.d/snapshot-helper.conf
-install -D -m 0755 "$fw/studio-install/firstboot.sh" /usr/local/sbin/smartroom-firstboot
+  >/etc/systemd/system/smartroom-controller.service.d/snapshot-helper.conf
 # smartroom-release checks a release's manifest against this key (the SmartRoom
 # package key, public). Without it a room can only stage an unsigned release.
 # release-key.asc is the production half. release-key-dev.asc, when the build
@@ -89,20 +88,15 @@ install -D -m 0644 "$fw/builder/image/rootfs/etc/NetworkManager/conf.d/smartroom
 install -D -m 0600 "$here/smartroom-wired.nmconnection" \
   /etc/NetworkManager/system-connections/smartroom-wired.nmconnection
 
-# The studio setup, unchanged, in image mode. Its pacman.conf merge and mirror
-# list switch go to scratch copies: the image keeps Omarchy's stable template.
-scratch=$(mktemp -d)
-cp /etc/pacman.conf "$scratch/pacman.conf"
-cp /etc/pacman.d/mirrorlist "$scratch/mirrorlist"
+# The studio setup, unchanged, in image mode. The image keeps Omarchy's stable
+# pacman template; the setup installs no packages.
 SMARTROOM_IMAGE_BUILD=1 \
   SMARTROOM_OVERLAY="$overlay" \
   SMARTROOM_LIB="$overlay/usr/local/lib/smartroom/install-lib.sh" \
   SMARTROOM_SNAPSHOT_LIB="$overlay/usr/local/lib/smartroom/snapshot-lib.sh" \
   SMARTROOM_AUTHORIZED_KEYS="$here/authorized_keys" \
-  SMARTROOM_PACMAN_CONF="$scratch/pacman.conf" \
-  SMARTROOM_PACMAN_MIRRORLIST="$scratch/mirrorlist" \
   "$fw/bin/smartroom-studio-setup"
-rm -rf "$scratch" "$overlay"
+rm -rf "$overlay"
 
 # As on a stock Omarchy Mac (its install/config/enable-services.sh, which a
 # room does not run): nothing at boot waits for the network to come up.

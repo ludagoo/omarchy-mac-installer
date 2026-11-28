@@ -2,7 +2,7 @@
 # Build the SmartRoom packages from ludagoo/omarchy-mac-pkgs into a signed
 # local pacman repository "smartroom" (on an Arch Linux ARM aarch64 host):
 #   smartroom/build-packages OUT [COMMIT]
-# COMMIT defaults to the tip of omarchy-mac-pkgs smartroom/main. Packages are
+# COMMIT defaults to the tip of omarchy-mac-pkgs smartroom/edge. Packages are
 # signed with the local SmartRoom package key (SMARTROOM_PKG_KEY, a gpg
 # fingerprint in the builder's keyring; its secret never leaves the build host).
 # OUT gets repo/ (packages, signatures, smartroom.db), key.asc and key.fpr.
@@ -18,7 +18,7 @@ key=${SMARTROOM_PKG_KEY:?set SMARTROOM_PKG_KEY to the package signing key finger
 [[ $(uname -m) == aarch64 ]] || { echo "build on aarch64" >&2; exit 1; }
 src=$(mktemp -d); trap 'rm -rf "$src"' EXIT
 git clone -q https://github.com/ludagoo/omarchy-mac-pkgs.git "$src/pkgs"
-git -C "$src/pkgs" checkout -q "${commit:-origin/smartroom/main}"
+git -C "$src/pkgs" checkout -q "${commit:-origin/smartroom/edge}"
 commit=$(git -C "$src/pkgs" rev-parse HEAD)
 date=$(TZ=UTC0 git -C "$src/pkgs" show -s --format=%cd --date=format-local:%Y%m%d HEAD)
 mkdir -p "$out/repo"
@@ -29,7 +29,7 @@ packages=(smartroom-omarchy-helpers omarchy-mac-boot smartroom-boot-os smartroom
 # files, is copied in instead of compiling them again.
 if [[ -d $src/pkgs/smartroom/pkgbuilds/aura ]]; then
   if [[ -n ${SMARTROOM_EDGE_BOOT_PACKAGES:-} ]]; then
-    # studio-build's makepkg.conf compresses with xz unless a build overrides it.
+    # A host's makepkg.conf may compress with xz unless the build overrides it.
     # Accept either archive. Signatures use the same suffix plus .sig.
     shopt -s nullglob
     boot_archives=("$SMARTROOM_EDGE_BOOT_PACKAGES"/*.pkg.tar.zst "$SMARTROOM_EDGE_BOOT_PACKAGES"/*.pkg.tar.xz)

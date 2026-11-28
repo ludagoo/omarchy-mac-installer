@@ -1,5 +1,5 @@
 #!/bin/bash
-# Signatures required everywhere (PROGRAM decision 4, F6): no pacman
+# Signatures required everywhere: no pacman
 # configuration the builder or the SmartRoom tools write accepts a package
 # without a trusted signature. Only databases may be unsigned where their
 # publisher signs none (DatabaseOptional); the build pins those by sha256.

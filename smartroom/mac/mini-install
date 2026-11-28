@@ -7,7 +7,7 @@
 #     [--source diskNsM|free] [--size BYTES|nM|nG|nT] \
 #     [--full-readback] [--state DIR] [--yes] [--reboot]
 #
-# Without --yes it checks all preconditions (F7/F20 protection) and prints
+# Without --yes it checks all preconditions (protection) and prints
 # the partition/install plan; nothing on disk changes.
 # With --yes it:
 #   0. sets "start up automatically after a power failure" (pmset -a autorestart 1,
@@ -93,8 +93,8 @@ if [ -n "$fbenv" ]; then
     die "--firstboot-env $fbenv is not a file of at most 64 KiB"
   grep -Eq '^SMARTROOM_SERVER_URL=https?://[^[:space:]]+$' "$fbenv" ||
     die "$fbenv has no SMARTROOM_SERVER_URL=http(s)://..."
-  grep -Eq '^SMARTROOM_AGENT_INSTALL_SHA256=[0-9a-fA-F]{64}$' "$fbenv" ||
-    die "$fbenv has no SMARTROOM_AGENT_INSTALL_SHA256=<64 hex digits>"
+  grep -Eq '^SMARTROOM_CONTROLLER_INSTALL_SHA256=[0-9a-fA-F]{64}$' "$fbenv" ||
+    die "$fbenv has no SMARTROOM_CONTROLLER_INSTALL_SHA256=<64 hex digits>"
   ! grep -q "$(printf '\r')" "$fbenv" || die "$fbenv has CR line endings"
 fi
 
@@ -214,7 +214,7 @@ root_img_zip_bytes=$(unzip -l "$payload" root.img | awk '$NF == "root.img" {prin
 case $root_img_zip_bytes in ''|*[!0-9]*) die "cannot read root.img size from ZIP" ;; esac
 [ $((root_img_zip_bytes % 4096)) -eq 0 ] || die "root.img ($root_img_zip_bytes) is not 4 KiB aligned"
 
-# ---- 3. Inspect internal disk & partition plan (F7/F20 protection) ----------
+# ---- 3. Inspect internal disk & partition plan (protection) ----------
 snapshot() {
   local f=$tmp/s i id k v line
   query "$f.root" info -plist /
@@ -334,7 +334,7 @@ linux_target_bytes=$((alloc_total - esp_bytes))
 [ "$linux_target_bytes" -ge "$root_img_zip_bytes" ] ||
   die "Linux partition target ($linux_target_bytes bytes) < root.img ($root_img_zip_bytes bytes)"
 
-# ---- Power-cut policy (F9, WS7) ---------------------------------------------
+# ---- Power-cut policy ---------------------------------------------
 # A T2 Mac mini keeps "start up automatically after a power failure" in the
 # T2/SMC. Linux cannot read or write it on this model, so it has to be set
 # from macOS now, before the disk is touched; without it a room stays off

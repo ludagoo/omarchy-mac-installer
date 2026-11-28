@@ -340,7 +340,7 @@ json.dump({"os_list": [{"name": "SmartRoom Firmware", "default_os_name": "SmartR
   "package": sys.argv[2], "recovery_gui": "omarchy-native-v1", "partitions": []}]}, open(sys.argv[1], "w"))
 PY
 grep -q "\"$pkgname\"" "$t/img/installer_data.json" || fail "test installer_data.json"
-printf 'SMARTROOM_SERVER_URL=https://rooms.example.invalid\nSMARTROOM_AGENT_INSTALL_SHA256=%064d\n' 0 >"$t/fb.env"
+printf 'SMARTROOM_SERVER_URL=https://rooms.example.invalid\nSMARTROOM_CONTROLLER_INSTALL_SHA256=%064d\n' 0 >"$t/fb.env"
 touch "$t/restore-image"; chmod 755 "$t/restore-image"
 
 ei=$t/repo/smartroom/mac/engine-install
@@ -357,7 +357,7 @@ pw "$PW" | run "${common[@]}" && fail "a SmartRoom image without firstboot.env w
 grep -q "needs --firstboot-env" "$t/out" || fail "wrong refusal: $(tail -3 "$t/out")"
 printf 'SMARTROOM_SERVER_URL=https://x.invalid\n' >"$t/bad.env"
 pw "$PW" | run "${common[@]}" --firstboot-env "$t/bad.env" && fail "a firstboot.env without the install.sh sha256 was accepted"
-grep -q "SMARTROOM_AGENT_INSTALL_SHA256" "$t/out" || fail "wrong refusal: $(tail -3 "$t/out")"
+grep -q "SMARTROOM_CONTROLLER_INSTALL_SHA256" "$t/out" || fail "wrong refusal: $(tail -3 "$t/out")"
 pw "$PW" | CONSOLE_USER="" "$ei" "${common[@]}" --firstboot-env "$t/fb.env" >"$t/out" 2>&1 && fail "ran with no console user"
 grep -q "no user is logged in at this Mac's console" "$t/out" || fail "wrong refusal: $(tail -3 "$t/out")"
 # Only the --owner value changes. Substituting that owner token across the

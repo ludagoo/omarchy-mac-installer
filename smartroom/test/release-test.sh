@@ -1,5 +1,5 @@
 #!/bin/bash
-# A SmartRoom release image (PROGRAM decision 4): build-mac-image's release
+# A SmartRoom release image: build-mac-image's release
 # steps against a scratch root. The installed pacman.conf names only
 # [smartroom-release]; the release repository holds exactly the package
 # record, each archive with its publisher's signature; the build host signs

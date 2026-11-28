@@ -14,7 +14,11 @@ import subprocess
 import sys
 from pathlib import Path
 
-FORBIDDEN = re.compile(r"smartroomos|room\s+os", re.IGNORECASE)
+FORBIDDEN = re.compile(
+    r"smartroomos|room\s+os|smartroom-agent|smartroom_agent|"
+    r"/opt/smartroom/agent|SMARTROOM_AGENT_|/api/agent/|config/agent\.json",
+    re.IGNORECASE,
+)
 
 
 def find_root() -> Path:
@@ -102,6 +106,11 @@ def self_test(line_rules, path_rules) -> None:
         raise SystemExit("self-test: the product phrase was allowed")
     if not allowed("overlay/stray.sh", good, line_rules, path_rules):
         raise SystemExit("self-test: the legacy volume name was rejected")
+    old_unit = "smartroom" + "-agent.service"
+    if allowed("overlay/stray.sh", old_unit, line_rules, path_rules):
+        raise SystemExit("self-test: a pre-rename unit was allowed")
+    if not allowed("lib/controller_legacy.py", old_unit, line_rules, path_rules):
+        raise SystemExit("self-test: the migration module was rejected")
     print("self-test ok")
 
 
