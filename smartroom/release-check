@@ -20,7 +20,8 @@ fail() { echo "release-check: $*" >&2; exit 1; }
 [[ -d $dir ]] || fail "no release directory: $dir"
 dir=$(cd -- "$dir" && pwd)
 # The production release key. Dev signatures must be some other key.
-production_fpr=26436A50BDD17118770DE9185FDA1532DC448891
+# Override with SMARTROOM_PRODUCTION_KEY_FPR for other deployments.
+production_fpr=${SMARTROOM_PRODUCTION_KEY_FPR:-26436A50BDD17118770DE9185FDA1532DC448891}
 [[ $channel == dev || $channel == production ]] || fail "channel must be dev or production: $channel"
 [[ -z $defer || $defer == defer ]] || fail "the fifth argument is defer or nothing"
 if [[ $defer != defer ]]; then

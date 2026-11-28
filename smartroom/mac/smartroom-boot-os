@@ -9,10 +9,10 @@
 #
 # On Apple Silicon only a volume owner may change the startup disk: macOS's
 # bless needs an owner's name and password (--user/--stdinpass) even as root,
-# and nothing else can (no MDM command, no Jamf action; the boot-volume NVRAM
-# variables are not writable from macOS). So switching needs a credential:
+# and nothing else can (no MDM command can; the boot-volume NVRAM variables
+# are not writable from macOS). So switching needs a credential:
 #   --owner USER            the password is the first line of standard input
-#                           (SSH, or a Jamf script: ... --owner U <<<"$4");
+#                           (SSH, or a management script: ... --owner U <<<"$pw");
 #   --credential-file FILE  a root-owned 0600 file, line 1 the owner's short
 #                           name, line 2 the password (for a LaunchDaemon);
 # The password goes only to bless's standard input, never to argv or a log.

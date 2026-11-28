@@ -3,3 +3,8 @@ path	(^|/)ai_attribution_lint\.py$	the scanner names the patterns it looks for
 path	(^|/)ai-attribution-allow\.txt$	this list
 root	smartroom	our tree; upstream Omarchy stays out of this lint
 root	CARRY.md	our carry notes
+root	README.md	fork overview
+root	AGENTS.md	fork contributor guide
+root	bin	fork test entrypoint
+root	test/workflows.sh	fork workflow lint
+root	.github/workflows/check.yml	fork manual check workflow

@@ -18,5 +18,11 @@ path	(^|/)docs/legacy-names\.md$	site note of names kept until reinstall
 path	(^|/)smartroom-legacy-paths$	migration script names every previous path
 path	(^|/)test/unit/legacy-paths\.sh$	migration test names every previous path
 path	(^|/)test/unit/legacy-names\.sh$	reader tests name the previous label, key, and env
+path	(^|/)controller_legacy\.py$	pre-rename Room Controller names
 root	smartroom	our tree; upstream Omarchy stays out of this lint
 root	CARRY.md	our carry notes
+root	README.md	fork overview
+root	AGENTS.md	fork contributor guide
+root	bin	fork test entrypoint
+root	test/workflows.sh	fork workflow lint
+root	.github/workflows/check.yml	fork manual check workflow

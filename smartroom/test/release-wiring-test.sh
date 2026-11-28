@@ -1,6 +1,6 @@
 #!/bin/bash
 # The room image ships smartroom-release and sheds the Mini's snapshot and update
-# tools (F15), with the Room Controller pointed at smartroom-release.
+# tools, with the Room Controller pointed at smartroom-release.
 set -euo pipefail
 here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 fail() { echo "not ok - $*" >&2; exit 1; }
@@ -42,11 +42,11 @@ excluded() {
 }
 for dead in usr/local/sbin/smartroom-snapshot usr/local/bin/smartroom-snapshot usr/local/lib/smartroom/snapshot-lib.sh \
             usr/local/sbin/smartroom-boot-try usr/local/sbin/smartroom-boot-commit usr/local/sbin/smartroom-update \
-            etc/systemd/system/smartroom-agent.service.d/snapshot-helper.conf; do
+            etc/systemd/system/smartroom-controller.service.d/snapshot-helper.conf; do
   excluded "$dead" || fail "overlay-exclude must drop $dead"
 done
 for keep in usr/local/sbin/smartroom-first-connect usr/local/sbin/smartroom-emergency usr/local/lib/smartroom/install-lib.sh \
-            etc/systemd/system/smartroom-agent.service.d/serial-uucp.conf etc/sudoers.d/smartroomcontroller; do
+            etc/systemd/system/smartroom-controller.service.d/serial-uucp.conf etc/sudoers.d/smartroomcontroller; do
   ! excluded "$keep" || fail "overlay-exclude must keep $keep"
 done
 echo "ok - release wiring"

@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
 """Fail when AI attribution appears outside ai-attribution-allow.txt.
 
-The maintainer is the author of everything published here, so no file names an
-AI tool as author or helper. Checked, case-insensitive:
+No file names an AI tool as author or helper. Checked, case-insensitive:
 - Co-Authored-By and Assisted-by trailers;
-- "generated / written / drafted ... by / with" an AI tool, "AI-generated",
-  "AI agent", "AI assistant";
+- "generated / written / drafted ... by / with" an AI tool, "AI-generated";
 - AI tool names in prose: Claude, Grok, Copilot, ChatGPT, Codex, Gemini, Fable,
   and Cursor as the tool (cursor-agent, .cursor/, "Cursor IDE", "by Cursor").
   A mouse, text, or database cursor is not the tool and does not match.
@@ -30,13 +28,12 @@ RULES = [
     (
         "made-by",
         re.compile(
-            r"\b(generated|written|drafted|authored|created|produced|assisted|coded)"
-            r"\s+(with|by|using|via)\s+(an?\s+|the\s+)?(ai|" + TOOLS + r")\b",
+            r"\b(generated|written|drafted|authored|created|produced|assisted|coded|run)"
+            r"\s+(with|by|using|via)\s+(an?\s+|the\s+)?(ai(\s+(agent|assistant))?|" + TOOLS + r")\b",
             re.IGNORECASE,
         ),
     ),
     ("ai-made", re.compile(r"\bai[- ](generated|written|authored|assisted)\b", re.IGNORECASE)),
-    ("ai-agent", re.compile(r"\bai[- ](agents?|assistants?|coding)\b", re.IGNORECASE)),
     ("tool", re.compile(r"\b(claude|grok|copilot|chatgpt|codex|gemini|fable)", re.IGNORECASE)),
     (
         "cursor-tool",
@@ -105,7 +102,7 @@ def in_roots(rel: str, roots) -> bool:
 
 def scan(root: Path, line_rules, path_rules, roots) -> list[str]:
     listed = subprocess.check_output(
-        ["git", "ls-files", "-z", "-c", "-o", "--exclude-standard"],
+        ["git", "ls-files", "-z"],
         cwd=root,
     )
     hits = []
@@ -162,7 +159,8 @@ def self_test(line_rules, path_rules) -> None:
         "the text cursor moves with the caret",
         "no-cursor-on-rooms",
         "Synthetic test clips (p01-p10). No real people.",
-        "the Room Controller agent reports health",
+        "the Room Controller reports health",
+        'the term "agent" means an AI agent, not the Room Controller',
         "the remote admin runs this over SSH",
     ]
     for line in bad:

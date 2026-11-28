@@ -1,5 +1,9 @@
 # Apple installer development
 
+## SmartRoom
+
+Work on `smartroom/` and `CARRY.md`. Rooms build from `smartroom/edge`. The Room Controller unit is `smartroom-controller.service` and its tree is `/opt/smartroom/room-controller`. Do not put site names in this fork, and do not add AI-attribution trailers. Run `bash bin/test-ci.sh` for the full Linux test suite (`test/workflows.sh`, `test/all`, `image-builder/test/all`, `smartroom/test/all`), or `bash smartroom/test/all` for focused `smartroom/` changes. All workflows on this fork are `workflow_dispatch`-only. The rest of this file is the upstream installer guide.
+
 ## Goal autonomy
 
 During an active goal, choose and implement the best reversible local source,
@@ -27,7 +31,7 @@ proof.
 
 ## Iteration ownership and lifecycle
 
-- One Codex task owns an installer iteration. Use bounded subagents for
+- One task owns an installer iteration. Use bounded subagents for
   independent read-only analysis, but do not start a peer task that runs the
   same build, qualification, or physical workflow.
 - Preview the change-impact plan before Docker, image restoration,

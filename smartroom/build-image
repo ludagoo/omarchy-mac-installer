@@ -9,7 +9,7 @@
 # --firmware-repo URL|PATH clones the firmware from elsewhere (the GitHub repo
 # is private: a git bundle made on a machine that can read it works).
 #
-# The image is a release (PROGRAM decision 4) unless --dev: one exact package
+# The image is a release unless --dev: one exact package
 # set, written to OUT/release/VERSION as the signed repository
 # [smartroom-release] (the database signed here with the key.fpr key, which
 # never leaves this host), and the room's pacman.conf names only that
@@ -114,7 +114,7 @@ fi
 git clone -q "$firmware_repo" "$dir/fw"
 git -C "$dir/fw" checkout -q "$firmware"
 firmware=$(git -C "$dir/fw" rev-parse HEAD)
-git -C "$dir/fw" archive HEAD bin configs overlay studio-install/firstboot.sh \
+git -C "$dir/fw" archive HEAD bin configs overlay \
   builder/packages-target.aarch64 builder/image/rootfs | tar -x -C "$dir/setup/firmware"
 printf '%s\n' "$firmware" >"$dir/setup/firmware/COMMIT"
 version=$(date -u +%Y.%m.%d)

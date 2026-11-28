@@ -1,16 +1,28 @@
 #!/usr/bin/env bash
-# Linux checks for this fork: image-builder/test/all, smartroom/test/all,
-# and the Engine python tests. No Mac, no root, no image build.
+# Linux checks for this fork: test/workflows.sh, test/all,
+# image-builder/test/all, and smartroom/test/all. No Mac, no root, no image build.
 #
 # smartroom/test/zero-touch-boot-test.sh reads the boot leaves from
-# ludagoo/omarchy-mac-pkgs (branch smartroom/edge) unless SMARTROOM_MAC_BOOT
-# is already set, or a sibling checkout ../omarchy-mac-pkgs is present.
+# SMARTROOM_PKGS_REPO (default ludagoo/omarchy-mac-pkgs, branch smartroom/edge)
+# unless SMARTROOM_MAC_BOOT is already set, or a sibling checkout
+# ../omarchy-mac-pkgs is present.
+#
+# On CI (CI=true) or with --install-deps, missing apt packages are installed;
+# otherwise missing packages are listed without touching the host.
 #
 # Skipped here, and said so below: Swift package tests (macOS), and anything
 # that builds or boots a real image.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
+
+INSTALL_DEPS=0
+for arg in "$@"; do
+  case "$arg" in
+    --install-deps) INSTALL_DEPS=1 ;;
+    *) echo "test-ci: unknown argument: $arg" >&2; exit 2 ;;
+  esac
+done
 
 echo "test-ci: workflows"
 bash "$ROOT/test/workflows.sh"
@@ -41,6 +53,11 @@ install_apt() {
     pkgs+=(util-linux passwd)
   fi
   ((${#pkgs[@]})) || return 0
+  if [[ ${CI:-} != true && $INSTALL_DEPS -ne 1 ]]; then
+    echo "test-ci: missing apt packages: ${pkgs[*]}" >&2
+    echo "test-ci: install them or re-run with --install-deps" >&2
+    exit 1
+  fi
   export DEBIAN_FRONTEND=noninteractive
   as_root apt-get update
   as_root apt-get install -y "${pkgs[@]}"
@@ -59,23 +76,27 @@ if [[ $EUID -eq 0 && -z ${SMARTROOM_CI_AS_USER:-} ]]; then
     SMARTROOM_CI_AS_USER=1 \
     HOME="$home" \
     PATH="$PATH" \
+    CI="${CI:-}" \
     SMARTROOM_MAC_BOOT="${SMARTROOM_MAC_BOOT:-}" \
+    SMARTROOM_PKGS_REPO="${SMARTROOM_PKGS_REPO:-}" \
+    SMARTROOM_FIRMWARE="${SMARTROOM_FIRMWARE:-}" \
     bash "$ROOT/bin/test-ci.sh"
 fi
+
+pkgs_tmp=""
+cleanup_tmp() { [[ -z $pkgs_tmp ]] || rm -rf "$pkgs_tmp"; }
+trap cleanup_tmp EXIT
 
 if [[ -z ${SMARTROOM_MAC_BOOT:-} ]]; then
   sibling="$ROOT/../omarchy-mac-pkgs/omarchy-mac-boot"
   if [[ -f $sibling/setup/limine-boot.sh ]]; then
     SMARTROOM_MAC_BOOT=$(cd "$sibling" && pwd)
   else
-    dest=${TMPDIR:-/tmp}/omarchy-mac-pkgs-smartroom-edge
-    if [[ ! -f $dest/omarchy-mac-boot/setup/limine-boot.sh ]]; then
-      echo "test-ci: cloning ludagoo/omarchy-mac-pkgs smartroom/edge (boot leaves)"
-      rm -rf "$dest"
-      git clone --depth 1 --branch smartroom/edge \
-        https://github.com/ludagoo/omarchy-mac-pkgs.git "$dest"
-    fi
-    SMARTROOM_MAC_BOOT=$dest/omarchy-mac-boot
+    pkgs_repo=${SMARTROOM_PKGS_REPO:-https://github.com/ludagoo/omarchy-mac-pkgs.git}
+    pkgs_tmp=$(mktemp -d)
+    echo "test-ci: cloning $pkgs_repo smartroom/edge (boot leaves)"
+    git clone --depth 1 --branch smartroom/edge "$pkgs_repo" "$pkgs_tmp/pkgs"
+    SMARTROOM_MAC_BOOT=$pkgs_tmp/pkgs/omarchy-mac-boot
   fi
   export SMARTROOM_MAC_BOOT
 fi
@@ -84,18 +105,12 @@ fi
   exit 1
 }
 
+echo "test-ci: test/all"
+bash "$ROOT/test/all"
 echo "test-ci: image-builder/test/all"
 bash "$ROOT/image-builder/test/all"
 echo "test-ci: smartroom/test/all"
 bash "$ROOT/smartroom/test/all"
-echo "test-ci: Engine python tests"
-# Run each file. Ubuntu's Python 3.12 will not discover a directory that
-# has no __init__.py. Each file already ends in unittest.main().
-engine_fail=0
-for f in "$ROOT"/Engine/tests/test_*.py; do
-  python3 "$f" || engine_fail=1
-done
-[[ $engine_fail -eq 0 ]]
 
 echo "test-ci: skipping Swift package tests (Tests/, Recovery/Tests/). They need macOS. Not this runner."
 echo "test-ci: skipping image build and boot. Those need an aarch64 Linux host with Docker."

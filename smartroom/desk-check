@@ -56,7 +56,7 @@ kver=$(ls "$m/usr/lib/modules" | grep -- '-ARCH$' | head -n 1)
 echo "kernel $kver"
 bootchk_root=$m
 if [[ ! -d $m/etc/pacman.d/gnupg ]]; then
-  # Sealed WS2 release images drop /etc/pacman.d/gnupg (first boot builds it)
+  # Sealed release images drop /etc/pacman.d/gnupg (first boot builds it)
   # while keeping /var/lib/pacman/sync/smartroom-release.db.sig with
   # DatabaseRequired. Run the boot check against an ephemeral overlayfs root
   # whose keyring is populated strictly from the image's own keyrings.
@@ -258,7 +258,7 @@ sys.exit(open(sys.argv[2], "rb").read() not in open(sys.argv[1], "rb").read())' 
     grep -Eq '^GRUB_CMDLINE_LINUX_DEFAULT="(.*[[:space:]])?panic=10([[:space:]].*)?"$' "$m/etc/default/grub"
   check "panic=10 is on the Limine command line the UKI boots" \
     bash -c 'printf "%s\n" "$1" | grep -Eq "(^|[[:space:]])panic=10([[:space:]]|$)"' _ "$cmdline"
-  # Never wait at boot, reboot on every failure (SmartRoom Firmware WS1).
+  # Never wait at boot, reboot on every failure (zero-touch boot).
   check "Limine menu timeout: 0 (no menu a held key could keep open)" \
     test "$(sed -n 's/^timeout: //p' "$m/boot/efi/limine.conf")" = 0
   for word in oops=panic softlockup_panic=1 systemd.watchdog_sec=30; do
@@ -290,6 +290,7 @@ sys.exit(open(sys.argv[2], "rb").read() not in open(sys.argv[1], "rb").read())' 
   fi
   check "ESP install.conf: encrypt=0" grep -qx 'encrypt=0' "$m/boot/efi/omarchy/install.conf"
   check "sshd enabled" test -L "$wants/sshd.service"
+  check "smartroom-firstboot installed" test -x "$m/usr/local/sbin/smartroom-firstboot"
   check "SmartRoom first boot enabled" test -L "$wants/smartroom-firstboot.service"
   check "SmartRoom first boot runs after Omarchy's" grep -q 'After=omarchy-mac-first-boot.service' "$m/etc/systemd/system/smartroom-firstboot.service.d/10-after-omarchy-first-boot.conf"
   check "omarchy-mac-first-boot enabled" test -L "$wants/omarchy-mac-first-boot.service"
@@ -310,7 +311,7 @@ sys.exit(open(sys.argv[2], "rb").read() not in open(sys.argv[1], "rb").read())' 
     check "dev release keyring is mode 0644" test "$(stat -c %a "$devkr")" = 644
   fi
   check "smartroom-release carries the room's identity" grep -qx '/var/lib/smartroom' "$m/usr/share/smartroom/release-carry.list"
-  check "Room Controller helper is smartroom-release" grep -qx 'Environment=SMARTROOM_SNAPSHOT_HELPER=/usr/bin/smartroom-release' "$m/etc/systemd/system/smartroom-agent.service.d/snapshot-helper.conf"
+  check "Room Controller helper is smartroom-release" grep -qx 'Environment=SMARTROOM_SNAPSHOT_HELPER=/usr/bin/smartroom-release' "$m/etc/systemd/system/smartroom-controller.service.d/snapshot-helper.conf"
   for f in usr/local/sbin/smartroom-snapshot usr/local/bin/smartroom-snapshot usr/local/sbin/smartroom-boot-try \
            usr/local/sbin/smartroom-boot-commit usr/local/sbin/smartroom-update usr/local/lib/smartroom/snapshot-lib.sh; do
     check "Mini snapshot/update tool absent: $f" bash -c '[[ ! -e $1 && ! -L $1 ]]' _ "$m/$f"
@@ -323,7 +324,7 @@ sys.exit(open(sys.argv[2], "rb").read() not in open(sys.argv[1], "rb").read())' 
   cp "$m/etc/hosts" "$hosts_dest/etc/hosts"
   check "adoption leaves /etc/hosts world-readable" bash -c \
     'source "$1/usr/local/lib/smartroom/install-lib.sh" &&
-     SMARTROOM_DRY_RUN=1 SMARTROOM_AGENT_CONFIG=/nonexistent smartroom_apply_hostname deskcheck "$2" &&
+     SMARTROOM_DRY_RUN=1 SMARTROOM_CONTROLLER_CONFIG=/nonexistent smartroom_apply_hostname deskcheck "$2" &&
      grep -q "deskcheck" "$2/etc/hosts" && test "$(stat -c %a "$2/etc/hosts")" = 644' _ "$m" "$hosts_dest"
   rm -rf "$hosts_dest"
   for pkg in omarchy omarchy-settings omarchy-mac sddm plymouth quickshell uwsm; do

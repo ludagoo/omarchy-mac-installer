@@ -1,5 +1,9 @@
 # Omarchy Mac Installer
 
+## SmartRoom
+
+Rooms are built from `smartroom/edge` in this fork (`smartroom/build-image`). The image installs the Room Controller at `/opt/smartroom/room-controller` (`smartroom-controller.service`). Updates are a trial boot (`smartroom-release` in the packages fork): the room keeps the new release only after it proves healthy. This tree does not name a site. Run `bash bin/test-ci.sh` for the Linux test suite (all workflows on this fork, including `.github/workflows/check.yml`, are `workflow_dispatch`-only). Upstream Omarchy notes follow.
+
 A macOS app that installs [Omarchy](https://github.com/omacom/omarchy) on an Apple Silicon Mac, next to macOS. The app is named **Omarchy Installer** and uses the `org.omarchy.installer` identifiers (`Packaging/identity.conf`). It was extracted from [maralcbr/omarchy-mx-mac](https://github.com/maralcbr/omarchy-mx-mac) into [omacom/omarchy-mac-installer](https://github.com/omacom/omarchy-mac-installer); the Git history and attribution are preserved (see [extraction provenance](docs/extraction.md)).
 
 Status: every published installer release is a GitHub pre-release; the current notarized app is [Omarchy Installer 2.3.15](https://github.com/omacom/omarchy-mac-installer/releases/tag/v2.3.15); newer ones appear on the [releases page](https://github.com/omacom/omarchy-mac-installer/releases). Since installer 2.3.14 the app opens on the stable channel by default, which offers Omarchy 4.5. See [Release channels](#release-channels).

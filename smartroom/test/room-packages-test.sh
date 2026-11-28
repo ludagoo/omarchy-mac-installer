@@ -1,7 +1,7 @@
 #!/bin/bash
 # room/packages is the firmware's builder/packages-target.aarch64 minus what the
 # Omarchy bottom layer installs (its header). A package the firmware adds for both
-# lines (cloudflared for the room tunnel, WS15) must reach the Studio image too:
+# lines (cloudflared for the room tunnel) must reach the Studio image too:
 # 2026.11.21-studio-edge had no cloudflared, and the tunnel only ran from a hand install.
 set -euo pipefail
 here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)

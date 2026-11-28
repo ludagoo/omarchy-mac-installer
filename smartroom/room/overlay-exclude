@@ -1,6 +1,6 @@
 # Files of ludagoo/smartroomcontrollerfirmware overlay/ that the Omarchy base
-# owns, so the room layer never installs them (brief task 3f: none of our old
-# boot changes). One shell glob per line, relative to overlay/.
+# owns, so the room layer never installs them (none of our old boot changes:
+# Omarchy's boot chain is used as it ships). One shell glob per line, relative to overlay/.
 # Boot chain: Limine menu and defaults, m1n1 stage 2 config, initramfs hooks,
 # the kernel command line (panic=10, iommu=pt, pm_async=off ...).
 boot/limine.conf
@@ -45,7 +45,7 @@ etc/pacman.d/*
 !etc/mkinitcpio.conf.d/zz-smartroom-safety.conf
 # Updates and rollback on a Studio are smartroom-release (a watchdog-guarded aura-try
 # trial of a whole release). The Mini's snapshot, boot-try, boot-commit and update
-# tools and the agent's pin to them are not on this image; setup-run pins the Room
+# tools and the Room Controller's pin to them are not on this image; setup-run pins the Room
 # Controller to smartroom-release instead.
 usr/local/sbin/smartroom-snapshot
 usr/local/bin/smartroom-snapshot
@@ -53,4 +53,4 @@ usr/local/lib/smartroom/snapshot-lib.sh
 usr/local/sbin/smartroom-boot-try
 usr/local/sbin/smartroom-boot-commit
 usr/local/sbin/smartroom-update
-etc/systemd/system/smartroom-agent.service.d/snapshot-helper.conf
+etc/systemd/system/smartroom-controller.service.d/snapshot-helper.conf
