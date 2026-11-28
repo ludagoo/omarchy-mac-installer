@@ -16,6 +16,9 @@ asc=${3:?Usage: smartroom/release-check DIR FINGERPRINT KEY.ASC CHANNEL}
 channel=${4:?Usage: smartroom/release-check DIR FINGERPRINT KEY.ASC CHANNEL [defer]}
 defer=${5-}
 fail() { echo "release-check: $*" >&2; exit 1; }
+# Later checks cd into DIR. A relative DIR would then miss its own files.
+[[ -d $dir ]] || fail "no release directory: $dir"
+dir=$(cd -- "$dir" && pwd)
 # The production release key. Dev signatures must be some other key.
 production_fpr=26436A50BDD17118770DE9185FDA1532DC448891
 [[ $channel == dev || $channel == production ]] || fail "channel must be dev or production: $channel"

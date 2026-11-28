@@ -142,6 +142,10 @@ signer=$!
 build_release_repository
 dir=$(release_dir)
 "$here/../release-check" "$dir" "$key" "$smartroom_dir/key.asc" dev >/dev/null || bad "the release directory passes release-check"
+(
+  cd -- "$(dirname -- "$dir")"
+  "$here/../release-check" "$(basename -- "$dir")" "$key" "$smartroom_dir/key.asc" dev >/dev/null
+) || bad "release-check accepts a relative directory"
 [[ $(cut -d'|' -f1 "$dir/PACKAGES" | paste -sd' ' -) == "base omarchy-mac-boot mesa-aurora" ]] || bad "PACKAGES is the record"
 grep -qx "package_set_sha256=$(package_set_sha256)" "$dir/RELEASE" || bad "RELEASE carries the image's package-set digest"
 grep -qx 'release=2026.11.20-studio-edge' "$dir/RELEASE" && grep -qx 'line=studio' "$dir/RELEASE" &&
