@@ -21,3 +21,8 @@ path	(^|/)test/unit/legacy-names\.sh$	reader tests name the previous label, key,
 path	(^|/)controller_legacy\.py$	pre-rename Room Controller names
 root	smartroom	our tree; upstream Omarchy stays out of this lint
 root	CARRY.md	our carry notes
+root	README.md	fork overview
+root	AGENTS.md	fork contributor guide
+root	bin	fork test entrypoint
+root	test/workflows.sh	fork workflow lint
+root	.github/workflows/check.yml	fork manual check workflow

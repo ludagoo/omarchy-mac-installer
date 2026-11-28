@@ -128,7 +128,7 @@ if "--setBoot" in a and "--stdinpass" in a:
     s["default_boot"] = a[a.index("--device") + 1].removeprefix("/dev/"); json.dump(s, open(STATE, "w")); sys.exit(0)
 sys.exit(2)
 PY
-console=${CONSOLE_USER-lucas}
+console=${CONSOLE_USER-owner1}
 cat >"$mock/scutil" <<'SH'
 #!/bin/bash
 cat >/dev/null
@@ -326,7 +326,7 @@ chmod +x "$t/repo/smartroom/mac/engine-install"
 grep -q "^PATH=$mock:" "$t/repo/smartroom/mac/engine-install" || fail "could not point the driver at the mocks"
 grep -q '^(( EUID == 0 )) || die "run as root (sudo)"$' "$src/smartroom/mac/engine-install" || fail "the root check moved"
 mkdir -p "$t/preboot/$GROUP/var/db"
-python3 -c 'import plistlib,sys; open(sys.argv[1],"wb").write(plistlib.dumps({"lucas": {}, "admin2": {}}))' \
+python3 -c 'import plistlib,sys; open(sys.argv[1],"wb").write(plistlib.dumps({"owner1": {}, "admin2": {}}))' \
   "$t/preboot/$GROUP/var/db/AdminUserRecoveryInfo.plist"
 
 # ---- the image (as the builder writes it) and a firstboot.env -------------
@@ -346,7 +346,7 @@ touch "$t/restore-image"; chmod 755 "$t/restore-image"
 ei=$t/repo/smartroom/mac/engine-install
 st=$t/state
 common=(--payload "$t/img/$pkgname" --sha256 "$psha" --installer-data "$t/img/installer_data.json"
-  --owner lucas --restore-image "$t/restore-image" --engine "$archive" --state "$st")
+  --owner owner1 --restore-image "$t/restore-image" --engine "$archive" --state "$st")
 run() { CONSOLE_USER=$console "$ei" "$@" >"$t/out" 2>&1; }
 pw() { printf '%s\n' "$1"; }
 disk() { python3 -c 'import json,sys; s=json.load(open(sys.argv[1])); print(*[p["id"]+":"+p["content"]+":"+str(p["offset"])+":"+str(p["size"]) for p in s["parts"]], s["default_boot"])' "$state"; }
@@ -367,7 +367,7 @@ other=(); prev=""
 for a in "${common[@]}"; do [[ $prev == --owner ]] && a=nobody; other+=("$a"); prev=$a; done
 pw "$PW" | run "${other[@]}" --firstboot-env "$t/fb.env" && fail "a non-owner was accepted"
 grep -q "nobody is not a macOS machine owner" "$t/out" || fail "wrong refusal: $(tail -3 "$t/out")"
-pw "$PW" | NO_TOKEN=lucas run "${common[@]}" --firstboot-env "$t/fb.env" && fail "an owner without a secure token was accepted"
+pw "$PW" | NO_TOKEN=owner1 run "${common[@]}" --firstboot-env "$t/fb.env" && fail "an owner without a secure token was accepted"
 [[ $(disk) == "$initial" ]] || fail "a refusal changed the disk"
 echo "ok - refuses: no firstboot.env, a bad one, no console user, a non-owner, no secure token"
 
@@ -413,7 +413,7 @@ python3 -c 'import json,sys; s=json.load(open(sys.argv[1])); s["engine_forgets_b
 pw "$PW" | run "${common[@]}" --firstboot-env "$t/fb.env" --full-readback --yes || fail "install: $(tail -8 "$t/out")"
 grep -q "the startup disk is not SmartRoom Firmware" "$t/out" || fail "no re-bless: $(tail -8 "$t/out")"
 [[ $(disk) == *" disk5s1" ]] || fail "not the default after re-bless: $(disk)"
-grep -q -- "--setBoot --device /dev/disk5s1 --user lucas --stdinpass" "$t/bless.log" || fail "bless log: $(cat "$t/bless.log")"
+grep -q -- "--setBoot --device /dev/disk5s1 --user owner1 --stdinpass" "$t/bless.log" || fail "bless log: $(cat "$t/bless.log")"
 echo "ok - re-blesses the stub when the engine's bless did not take"
 
 # pmset refuses: a warning, and the install goes on

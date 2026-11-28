@@ -93,7 +93,6 @@ install -D -m 0600 "$here/smartroom-wired.nmconnection" \
 SMARTROOM_IMAGE_BUILD=1 \
   SMARTROOM_OVERLAY="$overlay" \
   SMARTROOM_LIB="$overlay/usr/local/lib/smartroom/install-lib.sh" \
-  SMARTROOM_SNAPSHOT_LIB="$overlay/usr/local/lib/smartroom/snapshot-lib.sh" \
   SMARTROOM_AUTHORIZED_KEYS="$here/authorized_keys" \
   "$fw/bin/smartroom-studio-setup"
 rm -rf "$overlay"

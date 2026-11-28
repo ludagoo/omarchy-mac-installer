@@ -55,7 +55,7 @@ production_host=${SMARTROOM_PRODUCTION_HOST:-}
 production_host=${production_host#"${production_host%%[![:space:]]*}"}
 production_host=${production_host%"${production_host##*[![:space:]]}"}
 production_host=${production_host%.}
-production_host=${production_host,,}
+production_host=$(printf '%s' "$production_host" | tr '[:upper:]' '[:lower:]')
 restore=""   # default: the app's helper, /Applications/<INSTALLER_APP_NAME>.app/Contents/Helpers
 while (( $# )); do
   case $1 in
@@ -264,11 +264,10 @@ def choose(transcript, out, source, size):
     elif chosen["kind"] == "free":
         length = chosen["length_bytes"]
     else:
-        # Lucas's rule (2026-11-07; changed 2026-11-25): macOS keeps only the
-        # engine's minimum, which already holds the installer's own ~20 GiB
-        # reserve over Apple's recommended size (rooms never install macOS
-        # updates, so no second reserve); SmartRoom Firmware gets the rest.
-        # --size overrides it.
+        # Disk-split rule: macOS keeps only the engine's minimum, which
+        # already holds the installer's own ~20 GiB reserve over Apple's
+        # recommended size (rooms never install macOS updates, so no second
+        # reserve); SmartRoom Firmware gets the rest. --size overrides it.
         keep = chosen["minimum_container_bytes"]
         length = (chosen["length_bytes"] - keep) // (1 << 30) * (1 << 30)
         if length < chosen["minimum_install_bytes"]:

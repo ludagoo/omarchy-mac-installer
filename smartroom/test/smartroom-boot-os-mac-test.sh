@@ -11,7 +11,7 @@ mock=$t/bin state=$t/state.json
 mkdir -p "$mock"
 MG=AAAAAAAA-0000-0000-0000-000000000001 FG=BBBBBBBB-0000-0000-0000-000000000002
 cat >"$state" <<EOF
-{"default": "disk3s1s1", "next": null, "owners": {"lucas": "pw one"},
+{"default": "disk3s1s1", "next": null, "owners": {"owner1": "pw one"},
  "volumes": [
   {"c": 0, "id": "disk3s1", "name": "Macintosh HD", "role": "System", "group": "$MG"},
   {"c": 0, "id": "disk3s5", "name": "Macintosh HD - Data", "role": "Data", "group": "$MG"},
@@ -93,18 +93,18 @@ get() { python3 -c 'import json,sys; s=json.load(open(sys.argv[1])); print(s["de
 out=$("$t/sbo" status) && grep -qx 'default: macOS' <<<"$out" && grep -qx 'next:    none' <<<"$out" || fail "status: $out"
 "$t/sbo" firmware --once >"$t/out" 2>&1 && fail "switched without a credential"
 grep -q "needs an owner" "$t/out" || fail "wrong refusal: $(cat "$t/out")"
-printf 'wrong\n' | "$t/sbo" firmware --once --owner lucas >"$t/out" 2>&1 && fail "a wrong password switched"
+printf 'wrong\n' | "$t/sbo" firmware --once --owner owner1 >"$t/out" 2>&1 && fail "a wrong password switched"
 grep -q "bless refused (Bootability failed" "$t/out" || fail "wrong refusal: $(cat "$t/out")"
 [[ $(get) == "disk3s1s1 None" ]] || fail "a refusal changed the startup disk: $(get)"
 echo "ok - status; refuses without a credential and with a wrong password, changing nothing"
 
-out=$(printf 'pw one\n' | "$t/sbo" firmware --once --owner lucas) || fail "firmware --once: $out"
+out=$(printf 'pw one\n' | "$t/sbo" firmware --once --owner owner1) || fail "firmware --once: $out"
 [[ $out == "next start: SmartRoom Firmware" && $(get) == "disk3s1s1 disk5s1" ]] || fail "firmware --once: $out / $(get)"
-grep -q -- '--setBoot --device /dev/disk5s1 --nextonly --user lucas --stdinpass' "$t/bless.log" || fail "bless args: $(tail -1 "$t/bless.log")"
+grep -q -- '--setBoot --device /dev/disk5s1 --nextonly --user owner1 --stdinpass' "$t/bless.log" || fail "bless args: $(tail -1 "$t/bless.log")"
 ! grep -q 'pw one' "$t/bless.log" || fail "the password reached bless's arguments"
 echo "ok - firmware --once: bless --nextonly on the stub's System volume, password only on stdin"
 
-printf 'lucas\npw one\n' >"$t/cred"; chmod 644 "$t/cred"
+printf 'owner1\npw one\n' >"$t/cred"; chmod 644 "$t/cred"
 "$t/sbo" firmware --credential-file "$t/cred" >"$t/out" 2>&1 && fail "a world-readable credential file was used"
 grep -q "must be root's and 0600" "$t/out" || fail "wrong refusal: $(cat "$t/out")"
 chmod 600 "$t/cred"
@@ -118,13 +118,13 @@ fi
 [[ $out == "default: SmartRoom Firmware" && $(get) == disk5s1\ * && $(cat "$t/shutdown.log") == "-r now" ]] || fail "firmware default: $out / $(get)"
 echo "ok - firmware as default from a root-only credential file, then restart"
 
-out=$(printf 'pw one\n' | "$t/sbo" macos --owner lucas) || fail "macos: $out"
+out=$(printf 'pw one\n' | "$t/sbo" macos --owner owner1) || fail "macos: $out"
 [[ $out == "default: macOS" && $(get) == disk3s1s1\ * ]] || fail "macos: $out / $(get)"
-grep -q -- '^--mount / --setBoot --user lucas --stdinpass$' "$t/bless.log" || fail "macOS bless: $(tail -1 "$t/bless.log")"
+grep -q -- '^--mount / --setBoot --user owner1 --stdinpass$' "$t/bless.log" || fail "macOS bless: $(tail -1 "$t/bless.log")"
 echo "ok - macos as default: bless --mount / --setBoot, as Omarchy's Remove does"
 
 python3 -c 'import json,sys; s=json.load(open(sys.argv[1])); s["volumes"]=[v for v in s["volumes"] if v["c"]==0]; json.dump(s,open(sys.argv[1],"w"))' "$state"
-printf 'pw one\n' | "$t/sbo" firmware --owner lucas >"$t/out" 2>&1 && fail "switched to a missing firmware volume"
+printf 'pw one\n' | "$t/sbo" firmware --owner owner1 >"$t/out" 2>&1 && fail "switched to a missing firmware volume"
 grep -q "no SmartRoom Firmware volume" "$t/out" || fail "wrong refusal: $(cat "$t/out")"
 echo "ok - refuses when there is no firmware volume"
 for w in python3 python git clang xcrun strings jq perl; do

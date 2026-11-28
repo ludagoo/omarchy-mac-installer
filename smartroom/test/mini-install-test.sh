@@ -407,6 +407,26 @@ rm -f "$t/dev/rdisk0s3" "$t/dev/rdisk0s4"
 grep -q "MUTATE addPartition %EFI% disk0s3" "$FAKE_LOG" || fail "free space install did not add EFI"
 echo "ok - --source free uses existing trailing space without resizing macOS"
 
+# 4b. Server trust parity: plain http refused, production host requires --production
+reset_state_clean normal
+printf 'SMARTROOM_SERVER_URL=http://rooms.example.invalid\nSMARTROOM_CONTROLLER_INSTALL_SHA256=%064d\n' 0 >"$t/http.env"
+"$t/mi" --payload "$PAY" --sha256 "$PSHA" --installer-data "$IDATA" --firstboot-env "$t/http.env" >"$t/out" 2>&1 &&
+  fail "mini-install accepted plain http://"
+grep -q "plain http is refused" "$t/out" || fail "wrong http refusal: $(cat "$t/out")"
+printf 'SMARTROOM_SERVER_URL=https://prod.example.invalid.\nSMARTROOM_CONTROLLER_INSTALL_SHA256=%064d\n' 0 >"$t/prod.env"
+SMARTROOM_PRODUCTION_HOST=prod.example.invalid "$t/mi" --payload "$PAY" --sha256 "$PSHA" --installer-data "$IDATA" --firstboot-env "$t/prod.env" >"$t/out" 2>&1 &&
+  fail "mini-install accepted production host without --production"
+grep -q "say --production" "$t/out" || fail "wrong prod refusal: $(cat "$t/out")"
+SMARTROOM_PRODUCTION_HOST=prod.example.invalid "$t/mi" --payload "$PAY" --sha256 "$PSHA" --installer-data "$IDATA" --firstboot-env "$t/fb.env" --production >"$t/out" 2>&1 &&
+  fail "mini-install accepted --production with non-production host"
+grep -q "production needs the production server" "$t/out" || fail "wrong --production mismatch refusal: $(cat "$t/out")"
+rm -f "$t/dev/rdisk0s3" "$t/dev/rdisk0s4"
+SMARTROOM_PRODUCTION_HOST=prod.example.invalid "$t/mi" --payload "$PAY" --sha256 "$PSHA" --installer-data "$IDATA" --firstboot-env "$t/prod.env" --production --yes >"$t/out" 2>&1 ||
+  fail "mini-install production install failed: $(cat "$t/out")"
+grep -qx 'SMARTROOM_PRODUCTION=1' "$FAKE_MNT/disk0s3/smartroomos/firstboot.env" ||
+  fail "mini-install --production did not mark firstboot.env on ESP"
+echo "ok - mini-install enforces https-only and --production guard"
+
 # 5. POSIX syntax & no CLT tools
 for w in python3 python git clang xcrun strings jq perl; do
   ! grep -v '^ *#' "$script" | grep -Eq "(^|[;&|( ])$w( |$)" || fail "script calls forbidden tool $w"

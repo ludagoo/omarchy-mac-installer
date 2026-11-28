@@ -9,7 +9,7 @@
 # An unplugged cable cannot be done remotely; this is the closest thing that does not touch the room's
 # network settings. What it proves: boot reaches multi-user with no network and nothing waits for it, and
 # the room recovers by itself when the "cable" returns (NetworkManager re-activates the unchanged profile,
-# the agent registers again). What it does not prove: the Ethernet PHY's own link-up behaviour.
+# the Room Controller registers again). What it does not prove: the Ethernet PHY's own link-up behaviour.
 set -u
 IFACE=${NETSIM_IFACE:-end0}
 RUN=${NETSIM_RUN_DIR:-/run/NetworkManager/conf.d}

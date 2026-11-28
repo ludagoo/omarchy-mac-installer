@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 
 FORBIDDEN = re.compile(
-    r"smartroomos|room\s+os|smartroom-agent|smartroom_agent|"
+    r"smartroomos|room\s+os|smartroom-agent|smartroom_agent|smartroom\s+agent|"
     r"/opt/smartroom/agent|SMARTROOM_AGENT_|/api/agent/|config/agent\.json",
     re.IGNORECASE,
 )

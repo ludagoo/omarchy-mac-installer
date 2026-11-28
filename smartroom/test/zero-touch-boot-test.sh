@@ -43,6 +43,7 @@ etc=$test_tmp/etc
 mkdir -p "$stub" "$esp/EFI/BOOT" "$esp/EFI/Linux" "$etc/limine-entry-tool.d" \
   "$test_tmp/share/limine" "$test_tmp/boot/grub" "$test_tmp/runtime/default/limine"
 printf '#!/bin/bash\nexec "$@"\n' >"$stub/sudo"
+printf '#!/bin/bash\ncommand -v "$1" >/dev/null 2>&1\n' >"$stub/omarchy-cmd-present"
 printf '#!/bin/bash\nexit 0\n' >"$stub/omarchy-hw-apple-silicon"
 printf '#!/bin/bash\necho linux-aurora\n' >"$stub/omarchy-mac-kernel"
 printf '#!/bin/bash\necho "systemctl $*" >>"$TEST_CALLS"\n' >"$stub/systemctl"
@@ -89,9 +90,15 @@ fi
 printf '/+SmartRoom Firmware\n  //linux-aurora\n  protocol: efi\n  path: %s\n  cmdline: %s\n' "$path" "$cmdline" >>"$TEST_ESP/limine.conf"
 SH
 chmod +x "$stub"/*
-for name in omarchy-mac-limine-cmdline omarchy-mac-limine-deploy omarchy-mac-limine-active; do
+for name in omarchy-mac-limine-cmdline omarchy-mac-limine-active; do
   ln -s "$boot/bin/$name" "$stub/$name"
 done
+cat >"$stub/omarchy-mac-limine-deploy" <<SH
+#!/bin/bash
+echo "omarchy-mac-limine-deploy" >>"\$TEST_CALLS"
+exec "$boot/bin/omarchy-mac-limine-deploy" "\$@"
+SH
+chmod +x "$stub/omarchy-mac-limine-deploy"
 printf 'LIMINE\n' >"$test_tmp/share/limine/BOOTAA64.EFI"
 printf 'LIMINE\n' >"$esp/EFI/BOOT/BOOTAA64.EFI"
 printf 'UKI\n' >"$esp/EFI/Linux/omarchy_linux-aurora.efi"
@@ -145,6 +152,7 @@ grep -Eq '^GRUB_CMDLINE_LINUX_DEFAULT="(.*[[:space:]])?panic=10([[:space:]].*)?"
 : >"$test_tmp/limine.enabled"
 request=$test_tmp/boot-rebuild
 OMARCHY_IMAGE_BOOT_REBUILD="$request" leaf || fail "limine-boot.sh failed on the built configuration ($(cat "$calls"))"
+grep -qx omarchy-mac-limine-deploy "$calls" || fail "first boot did not run omarchy-mac-limine-deploy ($(cat "$calls"))"
 [[ -f $request ]] || fail "first boot did not defer the UKI rebuild"
 ! grep -qx limine-update "$calls" || fail "first boot rebuilt the UKI itself"
 cmp -s "$etc/limine-entry-tool.d/zz-smartroom-firmware.conf" "$test_tmp/drop-in" ||

@@ -10,7 +10,7 @@
 # upstream by a reviewed merge, never by a rebase or a force-push.
 set -euo pipefail
 
-repo=$(basename "$(git rev-parse --show-toplevel)")
+repo=omarchy-mac-installer
 upstream_url="https://github.com/omacom/$repo.git"
 merge=0
 for a in "$@"; do

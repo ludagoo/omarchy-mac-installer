@@ -436,7 +436,7 @@ grep -q 'done: "SmartRoom Firmware" removed' "$t/out" || fail "no success line"
 ls "$t/root/smartroom-remove-firmware/"run-*.log >/dev/null || fail "no run log"
 echo "ok - Engine layout: dry run changes nothing; --yes removes stub, ESP, Boot, Root by UUID and grows macOS to Recovery"
 
-# ---- 2. home Studio legacy layout, the stub is the startup disk --------------
+# ---- 2. Mac Studio legacy layout, the stub is the startup disk --------------
 setup legacy
 before=$(layout)
 run --yes </dev/null && fail "removed without --owner while the stub is the startup disk"

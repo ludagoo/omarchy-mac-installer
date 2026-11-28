@@ -82,7 +82,8 @@ printf '/+SmartRoom Firmware\n  cmdline: root=UUID=x\ntimeout: 1\n' >"$p/esp/lim
 zip=$t/smartroom-firmware-2026.11.17-aarch64-apple-silicon-mac-stable-os-package.zip
 (cd "$p" && bsdtar --format zip -cf "$zip" esp boot.img root.img)
 sha=$(sha256sum "$zip" | cut -d' ' -f1)
-echo "SMARTROOM_SERVER_URL=https://example.invalid" >"$t/fb.env"
+pin_sha=$(printf '%064d' 0)
+printf 'SMARTROOM_SERVER_URL=https://example.invalid\nSMARTROOM_CONTROLLER_INSTALL_SHA256=%s\n' "$pin_sha" >"$t/fb.env"
 args=(--zip "$zip" --sha256 "$sha" --esp disk0s4 --esp-partuuid a702d68c-b4bb-407e-845c-a60060a5d22b)
 
 # refusals
@@ -93,12 +94,21 @@ grep -q "not a Linux partition" "$t/out" || fail "wrong refusal: $(cat "$t/out")
 "$t/install" "${args[@]/$sha/0000}" --linux disk0s5 >"$t/out" 2>&1 && fail "a wrong payload digest was accepted"
 echo "ok - refuses the recovery container, a foreign ESP and a wrong digest"
 
-# server trust: https only; the production server only with --production
+# server trust & firstboot-env validation: https only, sha256 pin, no CR, <=64 KiB, production only with --production
 export SMARTROOM_PRODUCTION_HOST=rooms.example
-echo "SMARTROOM_SERVER_URL=http://example.invalid" >"$t/http.env"
+printf 'SMARTROOM_SERVER_URL=http://example.invalid\nSMARTROOM_CONTROLLER_INSTALL_SHA256=%s\n' "$pin_sha" >"$t/http.env"
 "$t/install" "${args[@]}" --linux disk0s5 --firstboot-env "$t/http.env" >"$t/out" 2>&1 && fail "an http server URL was accepted"
 grep -q "plain http is refused" "$t/out" || fail "wrong refusal: $(cat "$t/out")"
-echo "SMARTROOM_SERVER_URL=https://rooms.example." >"$t/prod.env"
+echo "SMARTROOM_SERVER_URL=https://example.invalid" >"$t/nosha.env"
+"$t/install" "${args[@]}" --linux disk0s5 --firstboot-env "$t/nosha.env" >"$t/out" 2>&1 && fail "missing install sha256 was accepted"
+grep -q "SMARTROOM_CONTROLLER_INSTALL_SHA256" "$t/out" || fail "wrong sha256 refusal: $(cat "$t/out")"
+printf 'SMARTROOM_SERVER_URL=https://example.invalid\r\nSMARTROOM_CONTROLLER_INSTALL_SHA256=%s\r\n' "$pin_sha" >"$t/cr.env"
+"$t/install" "${args[@]}" --linux disk0s5 --firstboot-env "$t/cr.env" >"$t/out" 2>&1 && fail "CR line endings were accepted"
+grep -q "CR line endings" "$t/out" || fail "wrong CR refusal: $(cat "$t/out")"
+{ cat "$t/fb.env"; head -c 70000 /dev/zero | tr '\0' 'x'; } >"$t/big.env"
+"$t/install" "${args[@]}" --linux disk0s5 --firstboot-env "$t/big.env" >"$t/out" 2>&1 && fail "oversized firstboot-env was accepted"
+grep -q "at most 64 KiB" "$t/out" || fail "wrong size refusal: $(cat "$t/out")"
+printf 'SMARTROOM_SERVER_URL=https://rooms.example.\nSMARTROOM_CONTROLLER_INSTALL_SHA256=%s\n' "$pin_sha" >"$t/prod.env"
 "$t/install" "${args[@]}" --linux disk0s5 --firstboot-env "$t/prod.env" >"$t/out" 2>&1 && fail "production without --production was accepted"
 grep -q "say --production" "$t/out" || fail "wrong refusal: $(cat "$t/out")"
 "$t/install" "${args[@]}" --linux disk0s5 --firstboot-env "$t/fb.env" --production >"$t/out" 2>&1 && fail "--production with a dev server was accepted"
@@ -112,7 +122,7 @@ grep -q "production needs --firstboot-env" "$t/out" || fail "wrong refusal: $(ca
 { cat "$t/prod.env"; echo SMARTROOM_PRODUCTION=1; } >"$t/prod-marked.env"
 "$t/install" "${args[@]}" --linux disk0s5 --firstboot-env "$t/prod-marked.env" --production >"$t/out" 2>&1 && fail "a file that sets SMARTROOM_PRODUCTION was accepted"
 grep -q "say --production instead" "$t/out" || fail "wrong refusal: $(cat "$t/out")"
-echo "ok - server trust: https only; production only with --production"
+echo "ok - server trust & firstboot-env validation: https, sha256 pin, no CR, <=64 KiB, production only with --production"
 
 # dry run changes nothing
 before=$(cat "$state"/disk0s*)
@@ -138,9 +148,9 @@ grep -qx encrypt=1 "$t/vol/disk0s4/omarchy/install.conf" || fail "encrypt=1 not 
 "$t/install" "${args[@]}" --boot disk0s5 --root disk0s6 >"$t/out" 2>&1 && fail "the recovery container accepted as --root"
 echo "ok - rewrites an installed Boot and Root, never the recovery container"
 
-printf 'SMARTROOM_SERVER_URL=https://rooms.example' >"$t/prod-nonl.env"
+printf 'SMARTROOM_SERVER_URL=https://rooms.example\nSMARTROOM_CONTROLLER_INSTALL_SHA256=%s' "$pin_sha" >"$t/prod-nonl.env"
 "$t/install" "${args[@]}" --boot disk0s5 --root disk0s7 --firstboot-env "$t/prod-nonl.env" --production --yes >"$t/out" 2>&1 ||
   fail "production install failed: $(cat "$t/out")"
-[[ $(cat "$t/vol/disk0s4/asahi/extras/firstboot.env") == $'SMARTROOM_SERVER_URL=https://rooms.example\nSMARTROOM_PRODUCTION=1' ]] ||
+[[ $(cat "$t/vol/disk0s4/asahi/extras/firstboot.env") == "$(printf 'SMARTROOM_SERVER_URL=https://rooms.example\nSMARTROOM_CONTROLLER_INSTALL_SHA256=%s\nSMARTROOM_PRODUCTION=1' "$pin_sha")" ]] ||
   fail "--production must add SMARTROOM_PRODUCTION=1 on its own line: $(cat "$t/vol/disk0s4/asahi/extras/firstboot.env")"
 echo "ok - --production marks the ESP copy"

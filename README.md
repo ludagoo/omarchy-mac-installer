@@ -2,12 +2,7 @@
 
 ## SmartRoom
 
-Rooms are built from `smartroom/edge` in this fork (`smartroom/build-image`).
-The image installs the Room Controller at `/opt/smartroom/room-controller`
-(`smartroom-controller.service`). Updates are a trial boot
-(`smartroom-release` in the packages fork): the room keeps the new release
-only after it proves healthy. This tree does not name a site. Upstream
-Omarchy notes follow.
+Rooms are built from `smartroom/edge` in this fork (`smartroom/build-image`). The image installs the Room Controller at `/opt/smartroom/room-controller` (`smartroom-controller.service`). Updates are a trial boot (`smartroom-release` in the packages fork): the room keeps the new release only after it proves healthy. This tree does not name a site. Run `bash bin/test-ci.sh` for the Linux test suite (all workflows on this fork, including `.github/workflows/check.yml`, are `workflow_dispatch`-only). Upstream Omarchy notes follow.
 
 A macOS app that installs [Omarchy](https://github.com/omacom/omarchy) on an Apple Silicon Mac, next to macOS. The app is named **Omarchy Installer** and uses the `org.omarchy.installer` identifiers (`Packaging/identity.conf`). It was extracted from [maralcbr/omarchy-mx-mac](https://github.com/maralcbr/omarchy-mx-mac) into [omacom/omarchy-mac-installer](https://github.com/omacom/omarchy-mac-installer); the Git history and attribution are preserved (see [extraction provenance](docs/extraction.md)).
 
